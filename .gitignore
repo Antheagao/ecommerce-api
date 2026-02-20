@@ -1,0 +1,54 @@
+# Build
+target/
+build/
+.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+*.class
+*.jar
+*.war
+*.log
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### VS Code ###
+.vscode/
+
+### Local / env (do not commit)
+.env
+.env.*
+!.env.example
+application-local.properties
+*-local.properties
+
+### OS
+.DS_Store
+Thumbs.db
+
+### Plan / notes (do not commit)
+*.plan.md
+plans/
+plan-notes/
+summary-notes/

@@ -1,0 +1,253 @@
+package com.antheagao.ecommerce_api.service;
+
+import com.antheagao.ecommerce_api.dto.*;
+import com.antheagao.ecommerce_api.entity.*;
+import com.antheagao.ecommerce_api.exception.ConflictException;
+import com.antheagao.ecommerce_api.exception.ResourceNotFoundException;
+import com.antheagao.ecommerce_api.repository.*;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
+
+@Service
+@RequiredArgsConstructor
+public class OrderService {
+
+    private static final String ORDER_NUMBER_PREFIX = "ORD-";
+
+    private final OrderRepository orderRepository;
+    private final OrderItemRepository orderItemRepository;
+    private final OrderNumberSeqRepository orderNumberSeqRepository;
+    private final UserRepository userRepository;
+    private final AddressRepository addressRepository;
+    private final ProductRepository productRepository;
+    private final CartRepository cartRepository;
+    private final CartItemRepository cartItemRepository;
+
+    @Transactional(readOnly = true)
+    public List<OrderResponse> findByUserId(Long userId) {
+        return orderRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public Page<OrderResponse> findByUserId(Long userId, Pageable pageable) {
+        return orderRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable).map(this::toResponse);
+    }
+
+    @Transactional(readOnly = true)
+    public OrderResponse findByIdAndUserId(Long id, Long userId) {
+        Order order = orderRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Order", id));
+        if (!order.getUser().getId().equals(userId)) {
+            throw new ResourceNotFoundException("Order", id);
+        }
+        return toResponse(order);
+    }
+
+    @Transactional
+    public OrderResponse createFromCart(Long userId, CreateOrderRequest req) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User", userId));
+        Address address = addressRepository.findById(req.getShippingAddressId())
+                .orElseThrow(() -> new ResourceNotFoundException("Address", req.getShippingAddressId()));
+        if (!address.getUser().getId().equals(userId)) {
+            throw new ResourceNotFoundException("Address", req.getShippingAddressId());
+        }
+
+        Cart cart = cartRepository.findByUserId(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Cart is empty"));
+        if (cart.getItems().isEmpty()) {
+            throw new ConflictException("Cart is empty");
+        }
+
+        String orderNumber = nextOrderNumber();
+        BigDecimal subtotal = BigDecimal.ZERO;
+        List<OrderItem> orderItems = new ArrayList<>();
+
+        for (CartItem ci : cart.getItems()) {
+            Product p = ci.getProduct();
+            int qty = ci.getQuantity();
+            if (p.getStockQuantity() == null || p.getStockQuantity() < qty) {
+                throw new ConflictException("Insufficient stock for: " + p.getName());
+            }
+            BigDecimal lineTotal = p.getPrice().multiply(BigDecimal.valueOf(qty));
+            subtotal = subtotal.add(lineTotal);
+            OrderItem oi = OrderItem.builder()
+                    .productName(p.getName())
+                    .quantity(qty)
+                    .unitPrice(p.getPrice())
+                    .subtotal(lineTotal)
+                    .product(p)
+                    .build();
+            orderItems.add(oi);
+            p.setStockQuantity(p.getStockQuantity() - qty);
+            productRepository.save(p);
+        }
+
+        BigDecimal tax = BigDecimal.ZERO;
+        BigDecimal shippingCost = BigDecimal.ZERO;
+        BigDecimal total = subtotal.add(tax).add(shippingCost);
+
+        Order order = Order.builder()
+                .user(user)
+                .orderNumber(orderNumber)
+                .status(OrderStatus.PENDING)
+                .shippingStreet(address.getStreet())
+                .shippingCity(address.getCity())
+                .shippingState(address.getStateOrProvince())
+                .shippingPostalCode(address.getPostalCode())
+                .shippingCountry(address.getCountry())
+                .subtotal(subtotal)
+                .tax(tax)
+                .shippingCost(shippingCost)
+                .total(total)
+                .build();
+        order = orderRepository.save(order);
+        for (OrderItem oi : orderItems) {
+            oi.setOrder(order);
+            orderItemRepository.save(oi);
+        }
+        cartItemRepository.findByCartId(cart.getId()).forEach(cartItemRepository::delete);
+
+        return toResponse(orderRepository.findById(order.getId()).orElseThrow());
+    }
+
+    @Transactional
+    public OrderResponse createFromItems(Long userId, CreateOrderRequest req) {
+        if (req.getItems() == null || req.getItems().isEmpty()) {
+            throw new IllegalArgumentException("Order must have items or use cart");
+        }
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User", userId));
+        Address address = addressRepository.findById(req.getShippingAddressId())
+                .orElseThrow(() -> new ResourceNotFoundException("Address", req.getShippingAddressId()));
+        if (!address.getUser().getId().equals(userId)) {
+            throw new ResourceNotFoundException("Address", req.getShippingAddressId());
+        }
+
+        String orderNumber = nextOrderNumber();
+        BigDecimal subtotal = BigDecimal.ZERO;
+        List<OrderItem> orderItems = new ArrayList<>();
+
+        for (OrderLineRequest line : req.getItems()) {
+            Product p = productRepository.findById(line.getProductId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Product", line.getProductId()));
+            int qty = Math.max(1, line.getQuantity());
+            if (p.getStockQuantity() == null || p.getStockQuantity() < qty) {
+                throw new ConflictException("Insufficient stock for: " + p.getName());
+            }
+            BigDecimal lineTotal = p.getPrice().multiply(BigDecimal.valueOf(qty));
+            subtotal = subtotal.add(lineTotal);
+            OrderItem oi = OrderItem.builder()
+                    .productName(p.getName())
+                    .quantity(qty)
+                    .unitPrice(p.getPrice())
+                    .subtotal(lineTotal)
+                    .product(p)
+                    .build();
+            orderItems.add(oi);
+            p.setStockQuantity(p.getStockQuantity() - qty);
+            productRepository.save(p);
+        }
+
+        BigDecimal tax = BigDecimal.ZERO;
+        BigDecimal shippingCost = BigDecimal.ZERO;
+        BigDecimal total = subtotal.add(tax).add(shippingCost);
+
+        Order order = Order.builder()
+                .user(user)
+                .orderNumber(orderNumber)
+                .status(OrderStatus.PENDING)
+                .shippingStreet(address.getStreet())
+                .shippingCity(address.getCity())
+                .shippingState(address.getStateOrProvince())
+                .shippingPostalCode(address.getPostalCode())
+                .shippingCountry(address.getCountry())
+                .subtotal(subtotal)
+                .tax(tax)
+                .shippingCost(shippingCost)
+                .total(total)
+                .build();
+        order = orderRepository.save(order);
+        for (OrderItem oi : orderItems) {
+            oi.setOrder(order);
+            orderItemRepository.save(oi);
+        }
+        return toResponse(orderRepository.findById(order.getId()).orElseThrow());
+    }
+
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public String nextOrderNumber() {
+        OrderNumberSeq seq = orderNumberSeqRepository.getForUpdate();
+        if (seq == null) {
+            seq = orderNumberSeqRepository.save(OrderNumberSeq.builder().id(1L).nextVal(1L).build());
+        }
+        long n = seq.getNextVal();
+        seq.setNextVal(n + 1);
+        orderNumberSeqRepository.save(seq);
+        return ORDER_NUMBER_PREFIX + String.format("%05d", n);
+    }
+
+    private OrderResponse toResponse(Order o) {
+        List<OrderItemResponse> items = o.getItems().stream()
+                .map(i -> OrderItemResponse.builder()
+                        .id(i.getId())
+                        .productId(i.getProduct() != null ? i.getProduct().getId() : null)
+                        .productName(i.getProductName())
+                        .quantity(i.getQuantity())
+                        .unitPrice(i.getUnitPrice())
+                        .subtotal(i.getSubtotal())
+                        .build())
+                .toList();
+        return OrderResponse.builder()
+                .id(o.getId())
+                .orderNumber(o.getOrderNumber())
+                .status(o.getStatus())
+                .shippingStreet(o.getShippingStreet())
+                .shippingCity(o.getShippingCity())
+                .shippingState(o.getShippingState())
+                .shippingPostalCode(o.getShippingPostalCode())
+                .shippingCountry(o.getShippingCountry())
+                .subtotal(o.getSubtotal())
+                .tax(o.getTax())
+                .shippingCost(o.getShippingCost())
+                .total(o.getTotal())
+                .createdAt(o.getCreatedAt())
+                .paymentReference(o.getPaymentReference())
+                .items(items)
+                .build();
+    }
+
+    @Transactional
+    public OrderResponse updateStatus(Long orderId, Long userId, OrderStatus newStatus, String paymentReference) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order", orderId));
+        if (!order.getUser().getId().equals(userId)) {
+            throw new ResourceNotFoundException("Order", orderId);
+        }
+        OrderStatus current = order.getStatus();
+        boolean valid = switch (current) {
+            case PENDING -> newStatus == OrderStatus.PAID || newStatus == OrderStatus.CANCELLED;
+            case PAID -> newStatus == OrderStatus.SHIPPED || newStatus == OrderStatus.CANCELLED;
+            case SHIPPED -> newStatus == OrderStatus.DELIVERED;
+            case DELIVERED, CANCELLED -> false;
+        };
+        if (!valid) {
+            throw new IllegalArgumentException("Invalid status transition from " + current + " to " + newStatus);
+        }
+        order.setStatus(newStatus);
+        if (paymentReference != null && !paymentReference.isBlank()) {
+            order.setPaymentReference(paymentReference);
+        }
+        order = orderRepository.save(order);
+        return toResponse(order);
+    }
+}
