@@ -59,6 +59,9 @@ public class SecurityConfig {
                         // Signature verification (StripeWebhookController) IS the auth for this endpoint --
                         // Stripe calls it server-to-server with no JWT, so it must be reachable anonymously.
                         .requestMatchers("/api/stripe/webhook").permitAll()
+                        // Must come before the blanket "/api/**".authenticated() below, or that broader
+                        // rule would win and admin-only endpoints would only require authentication.
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/**").authenticated()
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         .requestMatchers("/actuator/**").hasRole("ADMIN")
