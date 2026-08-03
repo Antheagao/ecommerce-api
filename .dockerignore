@@ -1,0 +1,12 @@
+target/
+.git/
+.github/
+.mvn/wrapper/*.jar
+plan-notes/
+summary-notes/
+.env
+.env.*
+*.md
+.idea/
+.vscode/
+.claude/
