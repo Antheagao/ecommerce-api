@@ -53,11 +53,9 @@ class UserControllerTest {
     }
 
     @Test
-    void getMe_unauthenticated_returns403() throws Exception {
-        // No AuthenticationEntryPoint is configured (no formLogin/httpBasic), so
-        // ExceptionTranslationFilter falls back to Http403ForbiddenEntryPoint for
-        // anonymous requests denied by an authorization rule -> 403, not 401.
+    void getMe_unauthenticated_returns401() throws Exception {
         mockMvc.perform(get("/api/users/me"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
     }
 }

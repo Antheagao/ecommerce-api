@@ -70,9 +70,10 @@ class AddressControllerTest {
     }
 
     @Test
-    void list_unauthenticated_returns403() throws Exception {
+    void list_unauthenticated_returns401() throws Exception {
         mockMvc.perform(get("/api/addresses"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
     }
 
     @Test
@@ -107,11 +108,11 @@ class AddressControllerTest {
     }
 
     @Test
-    void create_unauthenticated_returns403() throws Exception {
+    void create_unauthenticated_returns401() throws Exception {
         mockMvc.perform(post("/api/addresses")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(validRequestBody()))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

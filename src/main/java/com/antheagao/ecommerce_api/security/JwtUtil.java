@@ -3,6 +3,7 @@ package com.antheagao.ecommerce_api.security;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -13,18 +14,24 @@ import java.util.Date;
 @Component
 public class JwtUtil {
 
-    @Value("${app.jwt.secret:defaultSecretKeyThatShouldBeAtLeast256BitsLongForHS256}")
+    @Value("${app.jwt.secret}")
     private String secret;
 
     @Value("${app.jwt.expiration-ms:86400000}")
     private long expirationMs;
 
+    @PostConstruct
+    private void validateSecretLength() {
+        int length = secret.getBytes(StandardCharsets.UTF_8).length;
+        if (length < 32) {
+            throw new IllegalStateException("JWT secret must be at least 32 bytes (256 bits); got " + length + " bytes");
+        }
+    }
+
     private SecretKey getSigningKey() {
         byte[] keyBytes = secret.getBytes(StandardCharsets.UTF_8);
         if (keyBytes.length < 32) {
-            byte[] padded = new byte[32];
-            System.arraycopy(keyBytes, 0, padded, 0, keyBytes.length);
-            keyBytes = padded;
+            throw new IllegalStateException("JWT secret must be at least 32 bytes (256 bits); got " + keyBytes.length + " bytes");
         }
         return Keys.hmacShaKeyFor(keyBytes);
     }

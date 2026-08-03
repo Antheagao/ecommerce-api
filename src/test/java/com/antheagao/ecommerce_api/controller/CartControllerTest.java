@@ -57,9 +57,10 @@ class CartControllerTest {
     }
 
     @Test
-    void get_unauthenticated_returns403() throws Exception {
+    void get_unauthenticated_returns401() throws Exception {
         mockMvc.perform(get("/api/cart"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
     }
 
     @Test

@@ -102,17 +102,17 @@ class CategoryControllerTest {
                         .with(user(regularUser()))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(validRequestBody()))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
     }
 
     @Test
-    void create_unauthenticated_returns403() throws Exception {
-        // Anonymous access to an ADMIN-only route is denied by the authorization rule;
-        // with no AuthenticationEntryPoint configured, this falls back to 403 (not 401).
+    void create_unauthenticated_returns401() throws Exception {
         mockMvc.perform(post("/api/categories")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(validRequestBody()))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
     }
 
     @Test
