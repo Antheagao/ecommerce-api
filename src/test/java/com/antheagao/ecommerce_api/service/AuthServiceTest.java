@@ -10,6 +10,7 @@ import com.antheagao.ecommerce_api.repository.UserRepository;
 import com.antheagao.ecommerce_api.security.JwtUtil;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -54,7 +55,8 @@ class AuthServiceTest {
         when(userRepository.existsByEmail("new@example.com")).thenReturn(false);
         when(passwordEncoder.encode("password123")).thenReturn("hashed-pw");
         User saved = User.builder().id(1L).email("new@example.com").passwordHash("hashed-pw").build();
-        when(userRepository.save(any(User.class))).thenReturn(saved);
+        ArgumentCaptor<User> userCaptor = ArgumentCaptor.forClass(User.class);
+        when(userRepository.save(userCaptor.capture())).thenReturn(saved);
         when(jwtUtil.generateToken("new@example.com", 1L)).thenReturn("token123");
 
         AuthResponse response = authService.register(req);
@@ -63,7 +65,9 @@ class AuthServiceTest {
         assertThat(response.getUserId()).isEqualTo(1L);
         assertThat(response.getEmail()).isEqualTo("new@example.com");
         verify(passwordEncoder).encode("password123");
-        verify(userRepository).save(any(User.class));
+        // Guards against a bug that encodes the password but forgets to use the encoded value --
+        // e.g. `passwordHash(req.getPassword())` instead of `passwordHash(passwordEncoder.encode(...))`.
+        assertThat(userCaptor.getValue().getPasswordHash()).isEqualTo("hashed-pw");
     }
 
     @Test

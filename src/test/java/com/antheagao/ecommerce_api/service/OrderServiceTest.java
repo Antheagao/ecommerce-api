@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -83,8 +84,13 @@ class OrderServiceTest {
         Product productA = Product.builder().id(100L).name("Widget").price(new BigDecimal("9.99")).stockQuantity(10).build();
         Product productB = Product.builder().id(101L).name("Gadget").price(new BigDecimal("19.50")).stockQuantity(5).build();
         Cart cart = Cart.builder().id(50L).user(user).build();
-        CartItem item1 = CartItem.builder().id(1L).cart(cart).product(productA).quantity(3).unitPrice(productA.getPrice()).build();
-        CartItem item2 = CartItem.builder().id(2L).cart(cart).product(productB).quantity(2).unitPrice(productB.getPrice()).build();
+        // unitPrice deliberately set to a STALE value, different from the product's current price --
+        // OrderService.java:81 charges p.getPrice() (the product's live price), not ci.getUnitPrice()
+        // (the cart's price snapshot from whenever the item was added). If a product's price changes
+        // between "add to cart" and "checkout", the customer is charged the NEW price. This is exactly
+        // the cart/session amount-mismatch surface Batch 2's Stripe Checkout Session must reconcile.
+        CartItem item1 = CartItem.builder().id(1L).cart(cart).product(productA).quantity(3).unitPrice(new BigDecimal("1.00")).build();
+        CartItem item2 = CartItem.builder().id(2L).cart(cart).product(productB).quantity(2).unitPrice(new BigDecimal("1.00")).build();
         cart.setItems(new ArrayList<>(List.of(item1, item2)));
 
         CreateOrderRequest req = new CreateOrderRequest();
@@ -99,8 +105,8 @@ class OrderServiceTest {
 
         OrderResponse response = orderService.createFromCart(1L, req);
 
-        BigDecimal expectedSubtotal = new BigDecimal("9.99").multiply(BigDecimal.valueOf(3))
-                .add(new BigDecimal("19.50").multiply(BigDecimal.valueOf(2)));
+        BigDecimal expectedSubtotal = productA.getPrice().multiply(BigDecimal.valueOf(3))
+                .add(productB.getPrice().multiply(BigDecimal.valueOf(2)));
         assertThat(response.getSubtotal()).isEqualByComparingTo(expectedSubtotal);
         assertThat(response.getTax()).isEqualByComparingTo(BigDecimal.ZERO);
         assertThat(response.getShippingCost()).isEqualByComparingTo(BigDecimal.ZERO);
@@ -108,6 +114,8 @@ class OrderServiceTest {
         assertThat(response.getStatus()).isEqualTo(OrderStatus.PENDING);
         assertThat(response.getOrderNumber()).isEqualTo("ORD-00042");
         assertThat(response.getItems()).hasSize(2);
+        assertThat(response.getItems().get(0).getUnitPrice()).isEqualByComparingTo(productA.getPrice());
+        assertThat(response.getItems().get(1).getUnitPrice()).isEqualByComparingTo(productB.getPrice());
 
         assertThat(productA.getStockQuantity()).isEqualTo(7);
         assertThat(productB.getStockQuantity()).isEqualTo(3);
@@ -220,6 +228,29 @@ class OrderServiceTest {
     }
 
     @Test
+    void createFromCart_whenProductStockQuantityNull_throwsConflictException() {
+        // p.getStockQuantity() == null is treated the same as "not enough stock" (the check is
+        // `p.getStockQuantity() == null || p.getStockQuantity() < qty`), not skipped.
+        User user = User.builder().id(1L).build();
+        Address address = Address.builder().id(20L).user(user).build();
+        Product product = Product.builder().id(100L).name("Widget").price(new BigDecimal("9.99")).stockQuantity(null).build();
+        Cart cart = Cart.builder().id(50L).user(user).build();
+        CartItem item = CartItem.builder().id(1L).cart(cart).product(product).quantity(1).unitPrice(product.getPrice()).build();
+        cart.setItems(new ArrayList<>(List.of(item)));
+
+        CreateOrderRequest req = new CreateOrderRequest();
+        req.setShippingAddressId(20L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(addressRepository.findById(20L)).thenReturn(Optional.of(address));
+        when(cartRepository.findByUserId(1L)).thenReturn(Optional.of(cart));
+        when(orderNumberSeqRepository.getForUpdate()).thenReturn(OrderNumberSeq.builder().id(1L).nextVal(1L).build());
+
+        assertThatThrownBy(() -> orderService.createFromCart(1L, req))
+                .isInstanceOf(ConflictException.class)
+                .hasMessageContaining("Insufficient stock for: Widget");
+    }
+
+    @Test
     void createFromItems_whenValid_computesTotalsAndDecrementsStock() {
         User user = User.builder().id(1L).build();
         Address address = Address.builder().id(20L).user(user).build();
@@ -243,6 +274,69 @@ class OrderServiceTest {
         assertThat(response.getOrderNumber()).isEqualTo("ORD-00007");
         assertThat(response.getItems()).hasSize(1);
         assertThat(product.getStockQuantity()).isEqualTo(8);
+    }
+
+    @Test
+    void createFromItems_whenAddressOwnedBySomeoneElse_throwsResourceNotFoundException() {
+        User user = User.builder().id(1L).build();
+        User otherUser = User.builder().id(2L).build();
+        Address address = Address.builder().id(20L).user(otherUser).build();
+        OrderLineRequest line = new OrderLineRequest();
+        line.setProductId(100L);
+        line.setQuantity(1);
+        CreateOrderRequest req = new CreateOrderRequest();
+        req.setShippingAddressId(20L);
+        req.setItems(List.of(line));
+
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(addressRepository.findById(20L)).thenReturn(Optional.of(address));
+
+        assertThatThrownBy(() -> orderService.createFromItems(1L, req))
+                .isInstanceOf(ResourceNotFoundException.class)
+                .hasMessageContaining("Address not found");
+    }
+
+    @Test
+    void createFromItems_whenProductNotFound_throwsResourceNotFoundException() {
+        User user = User.builder().id(1L).build();
+        Address address = Address.builder().id(20L).user(user).build();
+        OrderLineRequest line = new OrderLineRequest();
+        line.setProductId(999L);
+        line.setQuantity(1);
+        CreateOrderRequest req = new CreateOrderRequest();
+        req.setShippingAddressId(20L);
+        req.setItems(List.of(line));
+
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(addressRepository.findById(20L)).thenReturn(Optional.of(address));
+        when(orderNumberSeqRepository.getForUpdate()).thenReturn(OrderNumberSeq.builder().id(1L).nextVal(1L).build());
+        when(productRepository.findById(999L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> orderService.createFromItems(1L, req))
+                .isInstanceOf(ResourceNotFoundException.class)
+                .hasMessageContaining("Product not found");
+    }
+
+    @Test
+    void createFromItems_whenInsufficientStock_throwsConflictException() {
+        User user = User.builder().id(1L).build();
+        Address address = Address.builder().id(20L).user(user).build();
+        Product product = Product.builder().id(100L).name("Widget").price(new BigDecimal("9.99")).stockQuantity(1).build();
+        OrderLineRequest line = new OrderLineRequest();
+        line.setProductId(100L);
+        line.setQuantity(5);
+        CreateOrderRequest req = new CreateOrderRequest();
+        req.setShippingAddressId(20L);
+        req.setItems(List.of(line));
+
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(addressRepository.findById(20L)).thenReturn(Optional.of(address));
+        when(orderNumberSeqRepository.getForUpdate()).thenReturn(OrderNumberSeq.builder().id(1L).nextVal(1L).build());
+        when(productRepository.findById(100L)).thenReturn(Optional.of(product));
+
+        assertThatThrownBy(() -> orderService.createFromItems(1L, req))
+                .isInstanceOf(ConflictException.class)
+                .hasMessageContaining("Insufficient stock for: Widget");
     }
 
     @Test
@@ -295,13 +389,17 @@ class OrderServiceTest {
 
     @Test
     void nextOrderNumber_whenSeqNull_selfHealsAndReturnsFirstNumber() {
+        ArgumentCaptor<OrderNumberSeq> seqCaptor = ArgumentCaptor.forClass(OrderNumberSeq.class);
         when(orderNumberSeqRepository.getForUpdate()).thenReturn(null);
-        when(orderNumberSeqRepository.save(any(OrderNumberSeq.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(orderNumberSeqRepository.save(seqCaptor.capture())).thenAnswer(inv -> inv.getArgument(0));
 
         String orderNumber = orderService.nextOrderNumber();
 
         assertThat(orderNumber).isEqualTo("ORD-00001");
         verify(orderNumberSeqRepository, times(2)).save(any(OrderNumberSeq.class));
+        // First save() creates the healed seq at nextVal=1; second save() persists it incremented to 2.
+        // ArgumentCaptor.getValue() returns the last capture, so this pins the post-increment state.
+        assertThat(seqCaptor.getValue().getNextVal()).isEqualTo(2L);
     }
 
     @Test
@@ -346,17 +444,31 @@ class OrderServiceTest {
         assertThat(response.getStatus()).isEqualTo(to);
     }
 
+    // The full invalid set: all 5x5 = 25 (from, to) pairs minus the 5 valid transitions above = 20 rows.
+    // Self-transitions are included -- PAID -> PAID in particular is the shape of a duplicate/replayed
+    // Stripe webhook that Batch 2's idempotent webhook handling must reject.
     @ParameterizedTest(name = "{0} -> {1} is an invalid transition")
     @CsvSource({
+            "PENDING, PENDING",
             "PENDING, SHIPPED",
             "PENDING, DELIVERED",
+            "PAID, PENDING",
+            "PAID, PAID",
             "PAID, DELIVERED",
-            "SHIPPED, CANCELLED",
+            "SHIPPED, PENDING",
             "SHIPPED, PAID",
+            "SHIPPED, SHIPPED",
+            "SHIPPED, CANCELLED",
+            "DELIVERED, PENDING",
             "DELIVERED, PAID",
+            "DELIVERED, SHIPPED",
+            "DELIVERED, DELIVERED",
             "DELIVERED, CANCELLED",
+            "CANCELLED, PENDING",
             "CANCELLED, PAID",
-            "CANCELLED, PENDING"
+            "CANCELLED, SHIPPED",
+            "CANCELLED, DELIVERED",
+            "CANCELLED, CANCELLED"
     })
     void updateStatus_whenInvalidTransition_throwsIllegalArgumentException(OrderStatus from, OrderStatus to) {
         User user = User.builder().id(1L).build();
@@ -379,6 +491,19 @@ class OrderServiceTest {
         orderService.updateStatus(1L, 1L, OrderStatus.PAID, "pi_12345");
 
         assertThat(order.getPaymentReference()).isEqualTo("pi_12345");
+    }
+
+    @Test
+    void updateStatus_whenPaymentReferenceBlank_doesNotOverwriteExistingReference() {
+        User user = User.builder().id(1L).build();
+        Order order = Order.builder().id(1L).user(user).status(OrderStatus.PENDING)
+                .paymentReference("pi_existing").items(new ArrayList<>()).build();
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
+        when(orderRepository.save(any(Order.class))).thenReturn(order);
+
+        orderService.updateStatus(1L, 1L, OrderStatus.PAID, "   ");
+
+        assertThat(order.getPaymentReference()).isEqualTo("pi_existing");
     }
 
     @Test

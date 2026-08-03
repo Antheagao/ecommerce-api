@@ -85,7 +85,48 @@ class CartServiceTest {
         assertThat(response.getItems()).hasSize(1);
         assertThat(response.getItems().get(0).getProductId()).isEqualTo(100L);
         assertThat(response.getItems().get(0).getQuantity()).isEqualTo(2);
+        assertThat(response.getItems().get(0).getSubtotal()).isEqualByComparingTo("19.98");
+        assertThat(response.getTotal()).isEqualByComparingTo("19.98");
         verify(cartItemRepository).save(argThat(item -> item.getQuantity() == 2));
+    }
+
+    @Test
+    void getCart_whenMultipleItems_sumsSubtotalsIntoTotal() {
+        // Pins CartService.toResponse's unitPrice x quantity per line and the reduce-into-total logic --
+        // this is the amount a Stripe Checkout Session will be created from in Batch 2.
+        User user = User.builder().id(1L).build();
+        Cart cart = Cart.builder().id(50L).user(user).build();
+        Product productA = Product.builder().id(100L).name("Widget").price(new BigDecimal("9.99")).build();
+        Product productB = Product.builder().id(101L).name("Gadget").price(new BigDecimal("4.25")).build();
+        CartItem item1 = CartItem.builder().id(1L).cart(cart).product(productA).quantity(3).unitPrice(productA.getPrice()).build();
+        CartItem item2 = CartItem.builder().id(2L).cart(cart).product(productB).quantity(2).unitPrice(productB.getPrice()).build();
+        cart.setItems(List.of(item1, item2));
+
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(cartRepository.findByUserId(1L)).thenReturn(Optional.of(cart));
+
+        CartResponse response = cartService.getCart(1L);
+
+        assertThat(response.getItems().get(0).getSubtotal()).isEqualByComparingTo("29.97");
+        assertThat(response.getItems().get(1).getSubtotal()).isEqualByComparingTo("8.50");
+        assertThat(response.getTotal()).isEqualByComparingTo("38.47");
+    }
+
+    @Test
+    void getCart_whenItemHasNullUnitPrice_treatsSubtotalAndTotalAsZero() {
+        User user = User.builder().id(1L).build();
+        Cart cart = Cart.builder().id(50L).user(user).build();
+        Product product = Product.builder().id(100L).name("Widget").build();
+        CartItem item = CartItem.builder().id(1L).cart(cart).product(product).quantity(2).unitPrice(null).build();
+        cart.setItems(List.of(item));
+
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(cartRepository.findByUserId(1L)).thenReturn(Optional.of(cart));
+
+        CartResponse response = cartService.getCart(1L);
+
+        assertThat(response.getItems().get(0).getSubtotal()).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(response.getTotal()).isEqualByComparingTo(BigDecimal.ZERO);
     }
 
     @Test
