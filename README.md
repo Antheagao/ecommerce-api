@@ -21,7 +21,7 @@ That's it. The app comes up on `http://localhost:8080` once Postgres passes its 
 - Swagger UI: `http://localhost:8080/swagger-ui.html`
 - Health: `http://localhost:8080/actuator/health`
 
-**Without Docker:** `.\mvnw.cmd spring-boot:run` works too, but you'll need a local Postgres instance and matching `DB_URL`/`DB_USERNAME`/`DB_PASSWORD` — see the comments in `.env.example` for pointing a local run at the compose Postgres instead.
+**Without Docker:** `.\mvnw.cmd spring-boot:run` works too, but you'll need a local Postgres instance and matching `DB_URL`/`DB_USERNAME`/`DB_PASSWORD`, plus `JWT_SECRET` in the environment (there is deliberately no default — the app refuses to boot without a real secret). See the comments in `.env.example` for pointing a local run at the compose Postgres instead.
 
 ### Environment variables (`.env.example`)
 
