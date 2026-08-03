@@ -153,6 +153,52 @@ class CartServiceTest {
     }
 
     @Test
+    void addItem_whenExistingPlusAddedWithinStock_mergesQuantity() {
+        User user = User.builder().id(1L).build();
+        Cart cart = Cart.builder().id(50L).user(user).items(new ArrayList<>()).build();
+        Product product = Product.builder().id(100L).name("Widget").price(new BigDecimal("9.99")).stockQuantity(10).build();
+        CartItem existing = CartItem.builder().id(1L).cart(cart).product(product).quantity(3).unitPrice(product.getPrice()).build();
+        AddCartItemRequest req = new AddCartItemRequest();
+        req.setProductId(100L);
+        req.setQuantity(5);
+
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(cartRepository.findByUserId(1L)).thenReturn(Optional.of(cart));
+        when(productRepository.findById(100L)).thenReturn(Optional.of(product));
+        when(cartItemRepository.findByCartIdAndProductId(50L, 100L)).thenReturn(Optional.of(existing));
+        Cart cartWithItem = Cart.builder().id(50L).user(user).items(List.of(existing)).build();
+        when(cartRepository.findById(50L)).thenReturn(Optional.of(cartWithItem));
+
+        cartService.addItem(1L, req);
+
+        assertThat(existing.getQuantity()).isEqualTo(8);
+        verify(cartItemRepository).save(existing);
+    }
+
+    @Test
+    void addItem_whenExistingPlusAddedExceedsStock_throwsConflict() {
+        User user = User.builder().id(1L).build();
+        Cart cart = Cart.builder().id(50L).user(user).items(new ArrayList<>()).build();
+        Product product = Product.builder().id(100L).name("Widget").price(new BigDecimal("9.99")).stockQuantity(10).build();
+        CartItem existing = CartItem.builder().id(1L).cart(cart).product(product).quantity(8).unitPrice(product.getPrice()).build();
+        AddCartItemRequest req = new AddCartItemRequest();
+        req.setProductId(100L);
+        req.setQuantity(5);
+
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+        when(cartRepository.findByUserId(1L)).thenReturn(Optional.of(cart));
+        when(productRepository.findById(100L)).thenReturn(Optional.of(product));
+        when(cartItemRepository.findByCartIdAndProductId(50L, 100L)).thenReturn(Optional.of(existing));
+
+        assertThatThrownBy(() -> cartService.addItem(1L, req))
+                .isInstanceOf(ConflictException.class)
+                .hasMessageContaining("Insufficient stock for product: Widget");
+
+        assertThat(existing.getQuantity()).isEqualTo(8);
+        verify(cartItemRepository, never()).save(any());
+    }
+
+    @Test
     void addItem_whenProductNotFound_throwsResourceNotFoundException() {
         User user = User.builder().id(1L).build();
         Cart cart = Cart.builder().id(50L).user(user).items(new ArrayList<>()).build();

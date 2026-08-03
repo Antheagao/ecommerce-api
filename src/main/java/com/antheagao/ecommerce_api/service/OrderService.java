@@ -69,52 +69,11 @@ public class OrderService {
         }
 
         String orderNumber = nextOrderNumber();
-        BigDecimal subtotal = BigDecimal.ZERO;
-        List<OrderItem> orderItems = new ArrayList<>();
+        List<OrderLine> lines = cart.getItems().stream()
+                .map(ci -> new OrderLine(ci.getProduct(), ci.getQuantity()))
+                .toList();
 
-        for (CartItem ci : cart.getItems()) {
-            Product p = ci.getProduct();
-            int qty = ci.getQuantity();
-            if (p.getStockQuantity() == null || p.getStockQuantity() < qty) {
-                throw new ConflictException("Insufficient stock for: " + p.getName());
-            }
-            BigDecimal lineTotal = p.getPrice().multiply(BigDecimal.valueOf(qty));
-            subtotal = subtotal.add(lineTotal);
-            OrderItem oi = OrderItem.builder()
-                    .productName(p.getName())
-                    .quantity(qty)
-                    .unitPrice(p.getPrice())
-                    .subtotal(lineTotal)
-                    .product(p)
-                    .build();
-            orderItems.add(oi);
-            p.setStockQuantity(p.getStockQuantity() - qty);
-            productRepository.save(p);
-        }
-
-        BigDecimal tax = BigDecimal.ZERO;
-        BigDecimal shippingCost = BigDecimal.ZERO;
-        BigDecimal total = subtotal.add(tax).add(shippingCost);
-
-        Order order = Order.builder()
-                .user(user)
-                .orderNumber(orderNumber)
-                .status(OrderStatus.PENDING)
-                .shippingStreet(address.getStreet())
-                .shippingCity(address.getCity())
-                .shippingState(address.getStateOrProvince())
-                .shippingPostalCode(address.getPostalCode())
-                .shippingCountry(address.getCountry())
-                .subtotal(subtotal)
-                .tax(tax)
-                .shippingCost(shippingCost)
-                .total(total)
-                .build();
-        order = orderRepository.save(order);
-        for (OrderItem oi : orderItems) {
-            oi.setOrder(order);
-            orderItemRepository.save(oi);
-        }
+        Order order = persistOrder(orderNumber, user, address, lines);
         cartItemRepository.findByCartId(cart.getId()).forEach(cartItemRepository::delete);
 
         return toResponse(orderRepository.findById(order.getId()).orElseThrow());
@@ -134,13 +93,36 @@ public class OrderService {
         }
 
         String orderNumber = nextOrderNumber();
-        BigDecimal subtotal = BigDecimal.ZERO;
-        List<OrderItem> orderItems = new ArrayList<>();
-
+        List<OrderLine> lines = new ArrayList<>();
         for (OrderLineRequest line : req.getItems()) {
             Product p = productRepository.findById(line.getProductId())
                     .orElseThrow(() -> new ResourceNotFoundException("Product", line.getProductId()));
-            int qty = Math.max(1, line.getQuantity());
+            lines.add(new OrderLine(p, Math.max(1, line.getQuantity())));
+        }
+
+        Order order = persistOrder(orderNumber, user, address, lines);
+        return toResponse(orderRepository.findById(order.getId()).orElseThrow());
+    }
+
+    /**
+     * Resolved order line: the product to charge/decrement and the quantity being ordered.
+     */
+    private record OrderLine(Product product, int quantity) {
+    }
+
+    /**
+     * Shared order-creation core for {@link #createFromCart} and {@link #createFromItems}: validates and
+     * decrements stock per line, computes totals, and persists the order and its items. Callers are
+     * responsible for allocating the order number, resolving their own lines, and any post-persist steps
+     * (e.g. clearing the cart).
+     */
+    private Order persistOrder(String orderNumber, User user, Address address, List<OrderLine> lines) {
+        BigDecimal subtotal = BigDecimal.ZERO;
+        List<OrderItem> orderItems = new ArrayList<>();
+
+        for (OrderLine line : lines) {
+            Product p = line.product();
+            int qty = line.quantity();
             if (p.getStockQuantity() == null || p.getStockQuantity() < qty) {
                 throw new ConflictException("Insufficient stock for: " + p.getName());
             }
@@ -181,7 +163,7 @@ public class OrderService {
             oi.setOrder(order);
             orderItemRepository.save(oi);
         }
-        return toResponse(orderRepository.findById(order.getId()).orElseThrow());
+        return order;
     }
 
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)

@@ -42,12 +42,13 @@ public class CartService {
         Product product = productRepository.findById(req.getProductId())
                 .orElseThrow(() -> new ResourceNotFoundException("Product", req.getProductId()));
         int qty = Math.max(1, req.getQuantity());
-        if (product.getStockQuantity() != null && product.getStockQuantity() < qty) {
+        CartItem existing = cartItemRepository.findByCartIdAndProductId(cart.getId(), product.getId()).orElse(null);
+        int totalQty = existing != null ? existing.getQuantity() + qty : qty;
+        if (product.getStockQuantity() != null && product.getStockQuantity() < totalQty) {
             throw new ConflictException("Insufficient stock for product: " + product.getName());
         }
-        CartItem existing = cartItemRepository.findByCartIdAndProductId(cart.getId(), product.getId()).orElse(null);
         if (existing != null) {
-            existing.setQuantity(existing.getQuantity() + qty);
+            existing.setQuantity(totalQty);
             cartItemRepository.save(existing);
         } else {
             CartItem item = CartItem.builder()
