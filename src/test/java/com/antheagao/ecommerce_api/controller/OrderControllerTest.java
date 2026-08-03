@@ -1,10 +1,12 @@
 package com.antheagao.ecommerce_api.controller;
 
+import com.antheagao.ecommerce_api.dto.CheckoutSessionResponse;
 import com.antheagao.ecommerce_api.dto.OrderResponse;
 import com.antheagao.ecommerce_api.entity.OrderStatus;
 import com.antheagao.ecommerce_api.exception.ResourceNotFoundException;
 import com.antheagao.ecommerce_api.security.CurrentUser;
 import com.antheagao.ecommerce_api.service.OrderService;
+import com.antheagao.ecommerce_api.service.StripeCheckoutService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -36,6 +38,9 @@ class OrderControllerTest {
 
     @MockitoBean
     private OrderService orderService;
+
+    @MockitoBean
+    private StripeCheckoutService stripeCheckoutService;
 
     private static CurrentUser regularUser() {
         return new CurrentUser(1L, "u@x.com", "pw", List.of(new SimpleGrantedAuthority("ROLE_USER")));
@@ -182,6 +187,28 @@ class OrderControllerTest {
         mockMvc.perform(post("/api/orders")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void createCheckoutSession_authenticated_returns201() throws Exception {
+        CheckoutSessionResponse response = CheckoutSessionResponse.builder()
+                .sessionId("cs_test_abc")
+                .url("https://checkout.stripe.com/pay/cs_test_abc")
+                .build();
+        when(stripeCheckoutService.createSession(eq(1L), eq(1L))).thenReturn(response);
+
+        mockMvc.perform(post("/api/orders/1/checkout-session").with(user(regularUser())))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.sessionId").value("cs_test_abc"))
+                .andExpect(jsonPath("$.url").value("https://checkout.stripe.com/pay/cs_test_abc"));
+
+        verify(stripeCheckoutService, times(1)).createSession(eq(1L), eq(1L));
+    }
+
+    @Test
+    void createCheckoutSession_unauthenticated_returns401() throws Exception {
+        mockMvc.perform(post("/api/orders/1/checkout-session"))
                 .andExpect(status().isUnauthorized());
     }
 

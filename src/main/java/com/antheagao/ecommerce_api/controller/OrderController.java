@@ -1,11 +1,13 @@
 package com.antheagao.ecommerce_api.controller;
 
+import com.antheagao.ecommerce_api.dto.CheckoutSessionResponse;
 import com.antheagao.ecommerce_api.dto.CreateOrderRequest;
 import com.antheagao.ecommerce_api.dto.OrderResponse;
 import com.antheagao.ecommerce_api.dto.OrderStatusUpdateRequest;
 import com.antheagao.ecommerce_api.entity.OrderStatus;
 import com.antheagao.ecommerce_api.security.CurrentUser;
 import com.antheagao.ecommerce_api.service.OrderService;
+import com.antheagao.ecommerce_api.service.StripeCheckoutService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -25,6 +27,7 @@ import java.util.List;
 public class OrderController {
 
     private final OrderService orderService;
+    private final StripeCheckoutService stripeCheckoutService;
 
     @GetMapping
     public ResponseEntity<?> list(@AuthenticationPrincipal CurrentUser user,
@@ -48,6 +51,12 @@ public class OrderController {
             return ResponseEntity.status(HttpStatus.CREATED).body(orderService.createFromCart(user.id(), request));
         }
         return ResponseEntity.status(HttpStatus.CREATED).body(orderService.createFromItems(user.id(), request));
+    }
+
+    @PostMapping("/{id}/checkout-session")
+    public ResponseEntity<CheckoutSessionResponse> createCheckoutSession(@PathVariable Long id,
+                                                                          @AuthenticationPrincipal CurrentUser user) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(stripeCheckoutService.createSession(user.id(), id));
     }
 
     @PatchMapping("/{id}/status")

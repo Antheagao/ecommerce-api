@@ -61,6 +61,9 @@ public class Order {
     @Column(name = "payment_reference")
     private String paymentReference;
 
+    @Column(name = "stripe_session_id", unique = true)
+    private String stripeSessionId;
+
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private List<OrderItem> items = new ArrayList<>();
