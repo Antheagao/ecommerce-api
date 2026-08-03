@@ -1,64 +1,58 @@
 package com.antheagao.ecommerce_api.controller;
 
-import com.antheagao.ecommerce_api.dto.RegisterRequest;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.*;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.allOf;
+import static org.hamcrest.Matchers.containsString;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest
+@AutoConfigureMockMvc
 class AuthControllerTest {
 
-    @Value("${local.server.port}")
-    private int port;
-
-    private final RestTemplate restTemplate = new RestTemplate();
-
     @Autowired
-    private ObjectMapper objectMapper;
+    private MockMvc mockMvc;
 
     @Test
     void register_withValidPayload_returns200AndToken() throws Exception {
-        RegisterRequest request = new RegisterRequest();
-        request.setEmail("test-" + System.currentTimeMillis() + "@example.com");
-        request.setPassword("password123");
-        request.setFirstName("Test");
+        String email = "test-" + System.currentTimeMillis() + "@example.com";
+        String requestBody = """
+                {
+                  "email": "%s",
+                  "password": "password123",
+                  "firstName": "Test"
+                }
+                """.formatted(email);
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        HttpEntity<String> entity = new HttpEntity<>(objectMapper.writeValueAsString(request), headers);
-
-        ResponseEntity<String> response = restTemplate.exchange(
-                "http://localhost:" + port + "/api/auth/register",
-                HttpMethod.POST,
-                entity,
-                String.class);
-
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getBody()).contains("\"token\"", "\"email\"", "\"userId\"");
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isOk())
+                .andExpect(content().string(allOf(
+                        containsString("\"token\""),
+                        containsString("\"email\""),
+                        containsString("\"userId\""))));
     }
 
     @Test
     void register_withInvalidEmail_returns400() throws Exception {
-        RegisterRequest request = new RegisterRequest();
-        request.setEmail("not-an-email");
-        request.setPassword("password123");
+        String requestBody = """
+                {
+                  "email": "not-an-email",
+                  "password": "password123"
+                }
+                """;
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        HttpEntity<String> entity = new HttpEntity<>(objectMapper.writeValueAsString(request), headers);
-
-        ResponseEntity<String> response = restTemplate.exchange(
-                "http://localhost:" + port + "/api/auth/register",
-                HttpMethod.POST,
-                entity,
-                String.class);
-
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody))
+                .andExpect(status().isBadRequest());
     }
 }
