@@ -31,6 +31,12 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD:?copy .env.example to .env and set it}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required - copy .env.example to .env and set it}
       JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
+      # Stripe is optional -- empty defaults (not :?) so compose still works
+      # with no Stripe env at all; payment endpoints just 503 until set.
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_SUCCESS_URL: ${STRIPE_SUCCESS_URL:-}
+      STRIPE_CANCEL_URL: ${STRIPE_CANCEL_URL:-}
 
 volumes:
   pgdata:

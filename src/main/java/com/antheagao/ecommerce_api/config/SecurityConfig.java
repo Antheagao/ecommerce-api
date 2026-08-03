@@ -60,6 +60,7 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         .requestMatchers("/actuator/**").hasRole("ADMIN")
                         .requestMatchers("/", "/error", "/favicon.ico").permitAll()
+                        .requestMatchers("/checkout-success.html", "/checkout-cancel.html").permitAll()
                         .anyRequest().denyAll())
                 .exceptionHandling(e -> e
                         .authenticationEntryPoint((request, response, authException) -> {

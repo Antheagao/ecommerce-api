@@ -138,6 +138,13 @@
             <version>2.8.6</version>
         </dependency>
 
+        <!-- Pinned exact version (not LATEST); 33.3.x are pre-release builds. -->
+        <dependency>
+            <groupId>com.stripe</groupId>
+            <artifactId>stripe-java</artifactId>
+            <version>33.2.0</version>
+        </dependency>
+
     </dependencies>
 
     <build>

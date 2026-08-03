@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Payment received</title>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            max-width: 32rem;
+            margin: 4rem auto;
+            padding: 0 1.5rem;
+            color: #1a1a1a;
+        }
+        h1 { color: #1a7f37; }
+        p { line-height: 1.5; }
+    </style>
+</head>
+<body>
+    <h1>Payment received</h1>
+    <p>Thanks for your order. Stripe has taken your payment.</p>
+    <p>Your order will be confirmed once our webhook receives and processes the
+       payment event from Stripe -- this usually happens within a few seconds,
+       so the order may still show as pending if you check immediately.</p>
+</body>
+</html>
