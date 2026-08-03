@@ -221,12 +221,37 @@ public class OrderService {
         if (!order.getUser().getId().equals(userId)) {
             throw new ResourceNotFoundException("Order", orderId);
         }
+        order = applyTransition(order, newStatus, paymentReference);
+        order = orderRepository.save(order);
+        return toResponse(order);
+    }
+
+    /**
+     * System-driven status transition with NO ownership check: the caller (webhook handler, refund
+     * endpoint, admin controller) is acting on behalf of the platform rather than a specific user, so
+     * there is no user to scope the order to.
+     */
+    @Transactional
+    public OrderResponse transitionSystem(Long orderId, OrderStatus newStatus, String paymentReference) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order", orderId));
+        order = applyTransition(order, newStatus, paymentReference);
+        order = orderRepository.save(order);
+        return toResponse(order);
+    }
+
+    /**
+     * Order state machine: PENDING -> {PAID, CANCELLED, FAILED}; PAID -> {SHIPPED, CANCELLED, REFUNDED};
+     * SHIPPED -> {DELIVERED, REFUNDED}; DELIVERED -> {REFUNDED}; CANCELLED/FAILED/REFUNDED are terminal.
+     */
+    private Order applyTransition(Order order, OrderStatus newStatus, String paymentReference) {
         OrderStatus current = order.getStatus();
         boolean valid = switch (current) {
-            case PENDING -> newStatus == OrderStatus.PAID || newStatus == OrderStatus.CANCELLED;
-            case PAID -> newStatus == OrderStatus.SHIPPED || newStatus == OrderStatus.CANCELLED;
-            case SHIPPED -> newStatus == OrderStatus.DELIVERED;
-            case DELIVERED, CANCELLED -> false;
+            case PENDING -> newStatus == OrderStatus.PAID || newStatus == OrderStatus.CANCELLED || newStatus == OrderStatus.FAILED;
+            case PAID -> newStatus == OrderStatus.SHIPPED || newStatus == OrderStatus.CANCELLED || newStatus == OrderStatus.REFUNDED;
+            case SHIPPED -> newStatus == OrderStatus.DELIVERED || newStatus == OrderStatus.REFUNDED;
+            case DELIVERED -> newStatus == OrderStatus.REFUNDED;
+            case CANCELLED, FAILED, REFUNDED -> false;
         };
         if (!valid) {
             throw new IllegalArgumentException("Invalid status transition from " + current + " to " + newStatus);
@@ -235,7 +260,6 @@ public class OrderService {
         if (paymentReference != null && !paymentReference.isBlank()) {
             order.setPaymentReference(paymentReference);
         }
-        order = orderRepository.save(order);
-        return toResponse(order);
+        return order;
     }
 }

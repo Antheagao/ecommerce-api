@@ -41,6 +41,10 @@ class OrderControllerTest {
         return new CurrentUser(1L, "u@x.com", "pw", List.of(new SimpleGrantedAuthority("ROLE_USER")));
     }
 
+    private static CurrentUser adminUser() {
+        return new CurrentUser(2L, "admin@x.com", "pw", List.of(new SimpleGrantedAuthority("ROLE_ADMIN")));
+    }
+
     private static OrderResponse sampleResponse() {
         return OrderResponse.builder()
                 .id(1L)
@@ -182,18 +186,10 @@ class OrderControllerTest {
     }
 
     @Test
-    void updateStatus_validTransition_returns200() throws Exception {
-        OrderResponse paid = OrderResponse.builder()
-                .id(1L)
-                .orderNumber("ORD-00001")
-                .status(OrderStatus.PAID)
-                .items(List.of())
-                .build();
-        when(orderService.updateStatus(eq(1L), eq(1L), eq(OrderStatus.PAID), isNull())).thenReturn(paid);
-
+    void updateStatus_asRegularUser_returns403() throws Exception {
         String body = """
                 {
-                  "status": "PAID"
+                  "status": "SHIPPED"
                 }
                 """;
 
@@ -201,13 +197,55 @@ class OrderControllerTest {
                         .with(user(regularUser()))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+    }
+
+    @Test
+    void updateStatus_asAdmin_validTransition_returns200() throws Exception {
+        OrderResponse shipped = OrderResponse.builder()
+                .id(1L)
+                .orderNumber("ORD-00001")
+                .status(OrderStatus.SHIPPED)
+                .items(List.of())
+                .build();
+        when(orderService.transitionSystem(eq(1L), eq(OrderStatus.SHIPPED), isNull())).thenReturn(shipped);
+
+        String body = """
+                {
+                  "status": "SHIPPED"
+                }
+                """;
+
+        mockMvc.perform(patch("/api/orders/1/status")
+                        .with(user(adminUser()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("PAID"));
+                .andExpect(jsonPath("$.status").value("SHIPPED"));
+    }
+
+    @Test
+    void updateStatus_asAdmin_setsPaid_returns400() throws Exception {
+        // PAID (like FAILED/REFUNDED) is payment-derived and may only arrive via a webhook event --
+        // the controller rejects it before ever calling orderService.transitionSystem.
+        String body = """
+                {
+                  "status": "PAID"
+                }
+                """;
+
+        mockMvc.perform(patch("/api/orders/1/status")
+                        .with(user(adminUser()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
     }
 
     @Test
     void updateStatus_invalidTransition_returns400() throws Exception {
-        when(orderService.updateStatus(eq(1L), eq(1L), eq(OrderStatus.DELIVERED), isNull()))
+        when(orderService.transitionSystem(eq(1L), eq(OrderStatus.DELIVERED), isNull()))
                 .thenThrow(new IllegalArgumentException("Invalid status transition from PENDING to DELIVERED"));
 
         String body = """
@@ -217,7 +255,7 @@ class OrderControllerTest {
                 """;
 
         mockMvc.perform(patch("/api/orders/1/status")
-                        .with(user(regularUser()))
+                        .with(user(adminUser()))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest())
@@ -232,7 +270,7 @@ class OrderControllerTest {
                 """;
 
         mockMvc.perform(patch("/api/orders/1/status")
-                        .with(user(regularUser()))
+                        .with(user(adminUser()))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest())

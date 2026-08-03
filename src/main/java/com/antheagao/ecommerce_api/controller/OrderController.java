@@ -3,6 +3,7 @@ package com.antheagao.ecommerce_api.controller;
 import com.antheagao.ecommerce_api.dto.CreateOrderRequest;
 import com.antheagao.ecommerce_api.dto.OrderResponse;
 import com.antheagao.ecommerce_api.dto.OrderStatusUpdateRequest;
+import com.antheagao.ecommerce_api.entity.OrderStatus;
 import com.antheagao.ecommerce_api.security.CurrentUser;
 import com.antheagao.ecommerce_api.service.OrderService;
 import jakarta.validation.Valid;
@@ -12,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -49,9 +51,13 @@ public class OrderController {
     }
 
     @PatchMapping("/{id}/status")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<OrderResponse> updateStatus(@PathVariable Long id,
-                                                      @Valid @RequestBody OrderStatusUpdateRequest request,
-                                                      @AuthenticationPrincipal CurrentUser user) {
-        return ResponseEntity.ok(orderService.updateStatus(id, user.id(), request.getStatus(), request.getPaymentReference()));
+                                                      @Valid @RequestBody OrderStatusUpdateRequest request) {
+        OrderStatus status = request.getStatus();
+        if (status == OrderStatus.PAID || status == OrderStatus.FAILED || status == OrderStatus.REFUNDED) {
+            throw new IllegalArgumentException("Status " + status + " can only be set by payment events");
+        }
+        return ResponseEntity.ok(orderService.transitionSystem(id, status, request.getPaymentReference()));
     }
 }

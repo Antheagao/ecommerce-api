@@ -429,9 +429,13 @@ class OrderServiceTest {
     @CsvSource({
             "PENDING, PAID",
             "PENDING, CANCELLED",
+            "PENDING, FAILED",
             "PAID, SHIPPED",
             "PAID, CANCELLED",
-            "SHIPPED, DELIVERED"
+            "PAID, REFUNDED",
+            "SHIPPED, DELIVERED",
+            "SHIPPED, REFUNDED",
+            "DELIVERED, REFUNDED"
     })
     void updateStatus_whenValidTransition_updatesStatus(OrderStatus from, OrderStatus to) {
         User user = User.builder().id(1L).build();
@@ -444,31 +448,52 @@ class OrderServiceTest {
         assertThat(response.getStatus()).isEqualTo(to);
     }
 
-    // The full invalid set: all 5x5 = 25 (from, to) pairs minus the 5 valid transitions above = 20 rows.
+    // The full invalid set: all 7x7 = 49 (from, to) pairs minus the 9 valid transitions above = 40 rows.
     // Self-transitions are included -- PAID -> PAID in particular is the shape of a duplicate/replayed
-    // Stripe webhook that Batch 2's idempotent webhook handling must reject.
+    // Stripe webhook that Batch 2's idempotent webhook handling must reject. CANCELLED/FAILED/REFUNDED
+    // are terminal, so every outgoing edge from them (including to each other) is invalid.
     @ParameterizedTest(name = "{0} -> {1} is an invalid transition")
     @CsvSource({
             "PENDING, PENDING",
             "PENDING, SHIPPED",
             "PENDING, DELIVERED",
+            "PENDING, REFUNDED",
             "PAID, PENDING",
             "PAID, PAID",
             "PAID, DELIVERED",
+            "PAID, FAILED",
             "SHIPPED, PENDING",
             "SHIPPED, PAID",
             "SHIPPED, SHIPPED",
             "SHIPPED, CANCELLED",
+            "SHIPPED, FAILED",
             "DELIVERED, PENDING",
             "DELIVERED, PAID",
             "DELIVERED, SHIPPED",
             "DELIVERED, DELIVERED",
             "DELIVERED, CANCELLED",
+            "DELIVERED, FAILED",
             "CANCELLED, PENDING",
             "CANCELLED, PAID",
             "CANCELLED, SHIPPED",
             "CANCELLED, DELIVERED",
-            "CANCELLED, CANCELLED"
+            "CANCELLED, CANCELLED",
+            "CANCELLED, FAILED",
+            "CANCELLED, REFUNDED",
+            "FAILED, PENDING",
+            "FAILED, PAID",
+            "FAILED, SHIPPED",
+            "FAILED, DELIVERED",
+            "FAILED, CANCELLED",
+            "FAILED, FAILED",
+            "FAILED, REFUNDED",
+            "REFUNDED, PENDING",
+            "REFUNDED, PAID",
+            "REFUNDED, SHIPPED",
+            "REFUNDED, DELIVERED",
+            "REFUNDED, CANCELLED",
+            "REFUNDED, FAILED",
+            "REFUNDED, REFUNDED"
     })
     void updateStatus_whenInvalidTransition_throwsIllegalArgumentException(OrderStatus from, OrderStatus to) {
         User user = User.builder().id(1L).build();
@@ -522,6 +547,29 @@ class OrderServiceTest {
         when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
 
         assertThatThrownBy(() -> orderService.updateStatus(1L, 1L, OrderStatus.PAID, null))
+                .isInstanceOf(ResourceNotFoundException.class)
+                .hasMessageContaining("Order not found");
+    }
+
+    @Test
+    void transitionSystem_ordersOwnedByAnotherUser_succeedsWithNoOwnershipCheck() {
+        // transitionSystem takes no userId param at all -- this is the webhook/refund/admin path,
+        // which acts on behalf of the platform rather than a specific user.
+        User owner = User.builder().id(1L).build();
+        Order order = Order.builder().id(1L).user(owner).status(OrderStatus.PENDING).items(new ArrayList<>()).build();
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
+        when(orderRepository.save(any(Order.class))).thenReturn(order);
+
+        OrderResponse response = orderService.transitionSystem(1L, OrderStatus.PAID, null);
+
+        assertThat(response.getStatus()).isEqualTo(OrderStatus.PAID);
+    }
+
+    @Test
+    void transitionSystem_whenOrderNotFound_throwsResourceNotFoundException() {
+        when(orderRepository.findById(999L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> orderService.transitionSystem(999L, OrderStatus.PAID, null))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining("Order not found");
     }
