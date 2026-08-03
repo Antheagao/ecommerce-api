@@ -6,6 +6,7 @@ import com.antheagao.ecommerce_api.exception.ConflictException;
 import com.antheagao.ecommerce_api.exception.ResourceNotFoundException;
 import com.antheagao.ecommerce_api.repository.*;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -15,6 +16,7 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class OrderService {
@@ -170,6 +172,10 @@ public class OrderService {
     public String nextOrderNumber() {
         OrderNumberSeq seq = orderNumberSeqRepository.getForUpdate();
         if (seq == null) {
+            // V1__baseline.sql seeds this row on Postgres, so this should never fire there;
+            // log if it does so a missed/failed migration surfaces instead of healing silently.
+            log.warn("order_number_seq row (id=1) missing; self-healing by creating it. " +
+                    "This should not happen on Postgres if V1__baseline.sql ran.");
             seq = orderNumberSeqRepository.save(OrderNumberSeq.builder().id(1L).nextVal(1L).build());
         }
         long n = seq.getNextVal();
