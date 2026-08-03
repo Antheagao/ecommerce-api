@@ -3,6 +3,7 @@ package com.antheagao.ecommerce_api.service;
 import com.antheagao.ecommerce_api.dto.*;
 import com.antheagao.ecommerce_api.entity.*;
 import com.antheagao.ecommerce_api.exception.ConflictException;
+import com.antheagao.ecommerce_api.exception.InvalidTransitionException;
 import com.antheagao.ecommerce_api.exception.ResourceNotFoundException;
 import com.antheagao.ecommerce_api.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -230,8 +231,18 @@ public class OrderService {
      * System-driven status transition with NO ownership check: the caller (webhook handler, refund
      * endpoint, admin controller) is acting on behalf of the platform rather than a specific user, so
      * there is no user to scope the order to.
+     * <p>
+     * noRollbackFor is load-bearing for callers (StripeWebhookService.process()) that join this
+     * method's transaction and try/catch InvalidTransitionException/ResourceNotFoundException around
+     * the call: without it, this being a separate proxied bean means the exception marks the shared
+     * transaction rollback-only the moment it crosses this method's boundary -- BEFORE the caller's
+     * catch runs -- so the caller's later commit throws UnexpectedRollbackException regardless of the
+     * catch. Both exceptions are thrown here before any entity mutation (the ResourceNotFoundException
+     * on lookup failure, the InvalidTransitionException from applyTransition before order.setStatus()),
+     * so there is nothing uncommitted to protect by rolling back -- suppressing rollback is safe, and
+     * both exceptions still propagate to the caller exactly as before.
      */
-    @Transactional
+    @Transactional(noRollbackFor = {InvalidTransitionException.class, ResourceNotFoundException.class})
     public OrderResponse transitionSystem(Long orderId, OrderStatus newStatus, String paymentReference) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order", orderId));
@@ -254,7 +265,7 @@ public class OrderService {
             case CANCELLED, FAILED, REFUNDED -> false;
         };
         if (!valid) {
-            throw new IllegalArgumentException("Invalid status transition from " + current + " to " + newStatus);
+            throw new InvalidTransitionException(current, newStatus);
         }
         order.setStatus(newStatus);
         if (paymentReference != null && !paymentReference.isBlank()) {

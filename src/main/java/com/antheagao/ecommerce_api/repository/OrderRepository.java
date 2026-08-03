@@ -23,6 +23,8 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     Optional<Order> findByStripeSessionId(String stripeSessionId);
 
+    Optional<Order> findByPaymentReference(String paymentReference);
+
     // Targeted single-column update instead of save(order): save() flushes every column from the
     // findById()-loaded snapshot, so a concurrent status transition (admin PATCH, or S7's webhook
     // handler) landing between that load and this transaction's commit would get silently overwritten

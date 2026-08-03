@@ -145,6 +145,17 @@
             <version>33.2.0</version>
         </dependency>
 
+        <!-- stripe-java declares this at runtime scope only (its own pom), so it's on the classpath at
+             test/run time already but not at compile time. S7's StripeWebhookService compiles against
+             com.stripe.net.ApiResource.GSON (stripe-java's bundled Gson instance, used to parse a
+             webhook event's raw data object when the SDK's typed deserialization comes back empty);
+             pinned to the exact version stripe-java 33.2.0 itself depends on. -->
+        <dependency>
+            <groupId>com.google.code.gson</groupId>
+            <artifactId>gson</artifactId>
+            <version>2.10.1</version>
+        </dependency>
+
     </dependencies>
 
     <build>
