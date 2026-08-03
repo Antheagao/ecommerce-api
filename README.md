@@ -1,5 +1,7 @@
 # Ecommerce API
 
+[![CI](https://github.com/Antheagao/ecommerce-api/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Antheagao/ecommerce-api/actions/workflows/ci.yml)
+
 A production-oriented REST API for an ecommerce platform, built with **Spring Boot 4**, **Java 21**, and **PostgreSQL**. The API supports catalog management, shopping cart, orders, JWT authentication, role-based access (USER/ADMIN), pagination, filtering, and OpenAPI documentation.
 
 ---
