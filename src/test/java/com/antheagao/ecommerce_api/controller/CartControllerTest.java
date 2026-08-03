@@ -19,6 +19,7 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -148,11 +149,15 @@ class CartControllerTest {
     void removeItem_authenticated_returns204() throws Exception {
         mockMvc.perform(delete("/api/cart/items/10").with(user(regularUser())))
                 .andExpect(status().isNoContent());
+
+        verify(cartService).removeItem(eq(1L), eq(10L));
     }
 
     @Test
     void clear_authenticated_returns204() throws Exception {
         mockMvc.perform(delete("/api/cart").with(user(regularUser())))
                 .andExpect(status().isNoContent());
+
+        verify(cartService).clearCart(eq(1L));
     }
 }

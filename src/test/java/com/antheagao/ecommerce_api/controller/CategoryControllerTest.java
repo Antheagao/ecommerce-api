@@ -157,8 +157,23 @@ class CategoryControllerTest {
     }
 
     @Test
+    void update_asRegularUser_returns403() throws Exception {
+        mockMvc.perform(put("/api/categories/1")
+                        .with(user(regularUser()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(validRequestBody()))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void delete_asAdmin_returns204() throws Exception {
         mockMvc.perform(delete("/api/categories/1").with(user(adminUser())))
                 .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void delete_asRegularUser_returns403() throws Exception {
+        mockMvc.perform(delete("/api/categories/1").with(user(regularUser())))
+                .andExpect(status().isForbidden());
     }
 }
