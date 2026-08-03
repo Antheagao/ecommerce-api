@@ -171,6 +171,44 @@ class StripeWebhookServiceTest {
         verifyNoInteractions(orderService);
     }
 
+    // S8 coverage: metadata.orderId is present but not a valid Long, and client_reference_id is
+    // blank -- exercises resolveOrderIdFromSession's NumberFormatException catch, falling through to
+    // its final "nothing left to try" return null.
+    @Test
+    void checkoutSessionCompleted_nonNumericMetadataOrderId_fallsThroughToNullOrderId() {
+        String json = checkoutSessionCompletedJson(CURRENT_API_VERSION, "evt_15", "cs_test_nonnumeric", 3998, "not-a-number", "", "pi_test_nonnumeric");
+        Event event = eventFrom(json);
+
+        service().process(event);
+
+        ArgumentCaptor<ProcessedStripeEvent> captor = ArgumentCaptor.forClass(ProcessedStripeEvent.class);
+        verify(processedStripeEventRepository).saveAndFlush(captor.capture());
+        assertThat(captor.getValue().getOrderId()).isNull();
+        verifyNoInteractions(orderService);
+    }
+
+    // S8 coverage: metadata.orderId absent, client_reference_id present -- resolveOrderIdFromSession
+    // falls through to the orderRepository.findByOrderNumber(clientReferenceId) lookup, which this
+    // test makes throw on its FIRST call (the best-effort resolution done before the event row is
+    // saved). Exercises resolveOrderIdBestEffort's own "swallow everything, record the event anyway"
+    // RuntimeException catch. The second call (inside handleCheckoutSessionCompleted itself, which has
+    // no such guard) is stubbed to return empty so the test isolates the best-effort path specifically.
+    @Test
+    void resolveOrderIdBestEffort_clientReferenceIdLookupThrows_recordsEventWithNullOrderId() {
+        String json = checkoutSessionCompletedJson(CURRENT_API_VERSION, "evt_14", "cs_test_throws", 3998, null, "ORD-THROWS", "pi_test_throws");
+        Event event = eventFrom(json);
+        when(orderRepository.findByOrderNumber("ORD-THROWS"))
+                .thenThrow(new RuntimeException("simulated repository failure"))
+                .thenReturn(Optional.empty());
+
+        service().process(event);
+
+        ArgumentCaptor<ProcessedStripeEvent> captor = ArgumentCaptor.forClass(ProcessedStripeEvent.class);
+        verify(processedStripeEventRepository).saveAndFlush(captor.capture());
+        assertThat(captor.getValue().getOrderId()).isNull();
+        verifyNoInteractions(orderService);
+    }
+
     @Test
     void checkoutSessionExpired_transitionsToFailed() {
         String json = """
@@ -260,6 +298,56 @@ class StripeWebhookServiceTest {
         verifyNoInteractions(orderService);
     }
 
+    // S8 coverage: order IS found via findByPaymentReference, but transitionSystem itself throws
+    // ResourceNotFoundException -- exercises handleChargeRefunded's own ResourceNotFoundException
+    // catch, distinct from chargeRefunded_unresolvableOrder above (which never finds an order at all).
+    @Test
+    void chargeRefunded_resourceNotFoundDuringTransition_swallowedEventStillRecorded() {
+        String json = """
+                {
+                  "id": "evt_12",
+                  "object": "event",
+                  "api_version": "%s",
+                  "type": "charge.refunded",
+                  "data": { "object": { "id": "ch_test_rnf", "object": "charge", "payment_intent": "pi_test_123",
+                             "refunded": true, "amount_refunded": 3998 } }
+                }
+                """.formatted(CURRENT_API_VERSION);
+        Event event = eventFrom(json);
+        Order order = orderWith(10L, new BigDecimal("39.98"), "cs_test_abc", OrderStatus.PAID);
+        when(orderRepository.findByPaymentReference("pi_test_123")).thenReturn(Optional.of(order));
+        when(orderService.transitionSystem(10L, OrderStatus.REFUNDED, null))
+                .thenThrow(new ResourceNotFoundException("Order", 10L));
+
+        service().process(event);
+
+        verify(processedStripeEventRepository).saveAndFlush(any());
+        verify(orderService).transitionSystem(10L, OrderStatus.REFUNDED, null);
+    }
+
+    // S8 coverage: charge.refunded with no payment_intent at all -- resolveOrderIdFromCharge's own
+    // blank-check short-circuits before ever calling orderRepository.findByPaymentReference.
+    @Test
+    void chargeRefunded_blankPaymentIntent_recordsOnlyNoTransition() {
+        String json = """
+                {
+                  "id": "evt_13",
+                  "object": "event",
+                  "api_version": "%s",
+                  "type": "charge.refunded",
+                  "data": { "object": { "id": "ch_test_blankpi", "object": "charge",
+                             "refunded": true, "amount_refunded": 3998 } }
+                }
+                """.formatted(CURRENT_API_VERSION);
+        Event event = eventFrom(json);
+
+        service().process(event);
+
+        verify(processedStripeEventRepository).saveAndFlush(any());
+        verify(orderRepository, never()).findByPaymentReference(any());
+        verifyNoInteractions(orderService);
+    }
+
     @Test
     void chargeRefunded_partialRefund_noTransitionEventStillRecorded() {
         // refunded=false + amount_refunded < amount (order total is 39.98 => 3998 minor units) -- a
@@ -313,6 +401,27 @@ class StripeWebhookServiceTest {
         when(orderRepository.findById(10L)).thenReturn(Optional.of(order));
         when(orderService.transitionSystem(eq(10L), eq(OrderStatus.PAID), any()))
                 .thenThrow(new InvalidTransitionException(OrderStatus.PAID, OrderStatus.PAID));
+
+        service().process(event);
+
+        verify(processedStripeEventRepository).saveAndFlush(any());
+        verify(orderService).transitionSystem(10L, OrderStatus.PAID, "pi_test_123");
+    }
+
+    // S8 coverage: order IS found at the initial lookup (so the amount/session checks pass and
+    // transitionSystem is actually invoked), but transitionSystem itself throws
+    // ResourceNotFoundException -- e.g. the order was deleted between that lookup and
+    // transitionSystem's own findById. Distinct from checkoutSessionExpired_unknownOrderId below
+    // (which never finds the order at all): this exercises handleCheckoutSessionCompleted's own
+    // ResourceNotFoundException catch specifically.
+    @Test
+    void checkoutSessionCompleted_resourceNotFoundDuringTransition_swallowedEventStillRecorded() {
+        String json = checkoutSessionCompletedJson(CURRENT_API_VERSION, "evt_12", "cs_test_abc", 3998, "10", "ORD-00010", "pi_test_123");
+        Event event = eventFrom(json);
+        Order order = orderWith(10L, new BigDecimal("39.98"), "cs_test_abc", OrderStatus.PENDING);
+        when(orderRepository.findById(10L)).thenReturn(Optional.of(order));
+        when(orderService.transitionSystem(10L, OrderStatus.PAID, "pi_test_123"))
+                .thenThrow(new ResourceNotFoundException("Order", 10L));
 
         service().process(event);
 
