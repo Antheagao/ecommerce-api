@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Antheum Goods</title>
+<style>
+  :root {
+    --accent: #3b6e5e;
+    --accent-dark: #2b5346;
+    --bg: #faf8f5;
+    --card: #ffffff;
+    --ink: #23261f;
+    --muted: #6b6f66;
+    --border: #e6e2da;
+    --danger: #b3432b;
+    --danger-bg: #fbeae5;
+    --ok-bg: #eaf3ee;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 28px;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .brand { font-size: 1.35rem; font-weight: 700; letter-spacing: -0.02em; color: var(--accent-dark); }
+  .brand small { display: block; font-size: 0.62rem; font-weight: 500; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }
+  .header-right { display: flex; align-items: center; gap: 14px; }
+  .auth-status { font-size: 0.9rem; color: var(--muted); }
+  .auth-status b { color: var(--ink); }
+  button, .btn {
+    font-family: inherit;
+    font-size: 0.88rem;
+    font-weight: 600;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: #fff;
+    padding: 8px 14px;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: background 0.15s, opacity 0.15s;
+  }
+  button:hover { background: var(--accent-dark); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.secondary { background: transparent; color: var(--accent-dark); }
+  button.secondary:hover { background: var(--ok-bg); }
+  button.link { border: none; background: none; color: var(--accent-dark); padding: 4px 6px; text-decoration: underline; }
+  button.small { padding: 4px 9px; font-size: 0.8rem; }
+  .cart-toggle { position: relative; }
+  .cart-badge {
+    position: absolute; top: -8px; right: -8px;
+    background: var(--danger); color: #fff; font-size: 0.68rem; font-weight: 700;
+    border-radius: 999px; min-width: 18px; height: 18px; display: flex; align-items: center; justify-content: center;
+    padding: 0 4px;
+  }
+  main { max-width: 1080px; margin: 0 auto; padding: 24px 28px 60px; }
+  #banner { margin-bottom: 18px; }
+  .msg {
+    padding: 10px 14px; border-radius: 8px; font-size: 0.88rem; margin-bottom: 10px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  }
+  .msg.error { background: var(--danger-bg); color: var(--danger); border: 1px solid #eccbc0; }
+  .msg.info { background: var(--ok-bg); color: var(--accent-dark); border: 1px solid #cfe3d8; }
+  .msg button { all: unset; cursor: pointer; font-weight: 700; color: inherit; padding: 0 4px; }
+
+  #auth-panel {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px 24px; margin-bottom: 24px; max-width: 420px;
+  }
+  #auth-panel h2 { margin: 0 0 4px; font-size: 1.05rem; }
+  #auth-panel p.sub { margin: 0 0 14px; font-size: 0.82rem; color: var(--muted); }
+  .tabs { display: flex; gap: 4px; margin-bottom: 14px; }
+  .tabs button { flex: 1; background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  .tabs button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  form.stack { display: flex; flex-direction: column; gap: 10px; }
+  form.stack input {
+    font-family: inherit; font-size: 0.9rem; padding: 9px 11px;
+    border: 1px solid var(--border); border-radius: 7px; background: #fff;
+  }
+  form.stack .row { display: flex; gap: 10px; }
+  form.stack .row input { flex: 1; }
+
+  h1.section-title { font-size: 1.15rem; margin: 0 0 14px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 18px;
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    overflow: hidden; display: flex; flex-direction: column;
+  }
+  .card-art {
+    height: 110px; display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 2.2rem; font-weight: 700; letter-spacing: -0.02em;
+  }
+  .card-body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+  .card-body h3 { margin: 0; font-size: 0.98rem; }
+  .card-body p.desc { margin: 0; font-size: 0.8rem; color: var(--muted); flex: 1; min-height: 2.4em; }
+  .card-meta { display: flex; justify-content: space-between; align-items: baseline; }
+  .price { font-weight: 700; font-size: 1.02rem; }
+  .stock { font-size: 0.74rem; color: var(--muted); }
+  .stock.low { color: var(--danger); }
+  .card-body button { margin-top: 4px; }
+
+  #cart-drawer {
+    position: fixed; top: 0; right: -400px; width: 380px; height: 100vh;
+    background: var(--card); border-left: 1px solid var(--border);
+    box-shadow: -8px 0 24px rgba(0,0,0,0.08);
+    transition: right 0.22s ease; z-index: 20;
+    display: flex; flex-direction: column;
+  }
+  #cart-drawer.open { right: 0; }
+  .cart-header { padding: 18px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .cart-header h2 { margin: 0; font-size: 1.05rem; }
+  .cart-items { flex: 1; overflow-y: auto; padding: 10px 20px; }
+  .cart-item { padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .cart-item-top { display: flex; justify-content: space-between; font-size: 0.9rem; font-weight: 600; }
+  .cart-item-sub { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; }
+  .qty-controls { display: flex; align-items: center; gap: 8px; }
+  .qty-controls button { padding: 2px 9px; }
+  .cart-empty { color: var(--muted); font-size: 0.88rem; padding: 20px 0; }
+  .cart-footer { padding: 16px 20px 20px; border-top: 1px solid var(--border); }
+  .cart-total { display: flex; justify-content: space-between; font-weight: 700; font-size: 1.05rem; margin-bottom: 12px; }
+  #overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.25); z-index: 19;
+    opacity: 0; pointer-events: none; transition: opacity 0.2s;
+  }
+  #overlay.open { opacity: 1; pointer-events: auto; }
+
+  footer { text-align: center; padding: 30px 20px 40px; font-size: 0.78rem; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">Antheum Goods<small>Demo Storefront</small></div>
+  <div class="header-right">
+    <span class="auth-status" id="auth-status">Not signed in</span>
+    <button class="cart-toggle secondary" id="cart-toggle-btn" onclick="toggleCart()">
+      Cart<span class="cart-badge" id="cart-badge" style="display:none">0</span>
+    </button>
+  </div>
+</header>
+
+<main>
+  <div id="banner"></div>
+
+  <section id="auth-panel">
+    <div class="tabs">
+      <button id="tab-login" class="active" onclick="setAuthTab('login')">Log in</button>
+      <button id="tab-register" onclick="setAuthTab('register')">Register</button>
+    </div>
+
+    <div id="login-view">
+      <h2>Welcome back</h2>
+      <p class="sub">Log in to add items to your cart and check out.</p>
+      <form class="stack" onsubmit="return handleLogin(event)">
+        <input type="email" id="login-email" placeholder="Email" required>
+        <input type="password" id="login-password" placeholder="Password" required>
+        <button type="submit">Log in</button>
+      </form>
+    </div>
+
+    <div id="register-view" style="display:none">
+      <h2>Create an account</h2>
+      <p class="sub">Takes a few seconds &mdash; this is a demo, not a real store.</p>
+      <form class="stack" onsubmit="return handleRegister(event)">
+        <div class="row">
+          <input type="text" id="register-first" placeholder="First name (optional)">
+          <input type="text" id="register-last" placeholder="Last name (optional)">
+        </div>
+        <input type="email" id="register-email" placeholder="Email" required>
+        <input type="password" id="register-password" placeholder="Password (min 8 chars)" minlength="8" required>
+        <button type="submit">Create account</button>
+      </form>
+    </div>
+
+    <div id="loggedin-view" style="display:none">
+      <h2>You're signed in</h2>
+      <p class="sub" id="loggedin-email"></p>
+      <button class="secondary" onclick="logout()">Log out</button>
+    </div>
+  </section>
+
+  <h1 class="section-title">Products</h1>
+  <div class="grid" id="product-grid"></div>
+</main>
+
+<div id="overlay" onclick="toggleCart()"></div>
+<div id="cart-drawer">
+  <div class="cart-header">
+    <h2>Your cart</h2>
+    <button class="link" onclick="toggleCart()">Close</button>
+  </div>
+  <div class="cart-items" id="cart-items">
+    <p class="cart-empty">Your cart is empty.</p>
+  </div>
+  <div class="cart-footer">
+    <div class="cart-total"><span>Total</span><span id="cart-total">$0.00</span></div>
+    <button id="checkout-btn" style="width:100%" onclick="checkout()" disabled>Checkout</button>
+  </div>
+</div>
+
+<footer>Demo storefront for the ecommerce-api backend.</footer>
+
+<script>
+const API = '/api';
+let token = localStorage.getItem('demo_token');
+let userEmail = localStorage.getItem('demo_email');
+let cart = null;
+let products = [];
+
+const PALETTE = ['#3b6e5e', '#a9622f', '#5a5a8c', '#8c5a5a', '#3f6f8c', '#7a7a3f'];
+
+function colorFor(name) {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  return PALETTE[Math.abs(hash) % PALETTE.length];
+}
+
+async function api(path, opts = {}) {
+  const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const res = await fetch(API + path, Object.assign({}, opts, { headers }));
+  if (res.status === 204) return null;
+  let body = null;
+  try { body = await res.json(); } catch (e) { /* empty body */ }
+  if (!res.ok) {
+    const err = new Error((body && body.message) || ('Request failed (' + res.status + ')'));
+    err.status = res.status;
+    err.code = body && body.code;
+    throw err;
+  }
+  return body;
+}
+
+function showMessage(text, type) {
+  const banner = document.getElementById('banner');
+  const div = document.createElement('div');
+  div.className = 'msg ' + (type || 'error');
+  div.innerHTML = '<span></span><button aria-label="dismiss">&times;</button>';
+  div.querySelector('span').textContent = text;
+  div.querySelector('button').onclick = () => div.remove();
+  banner.prepend(div);
+  if (type === 'info') setTimeout(() => div.remove(), 6000);
+}
+
+function setAuthTab(tab) {
+  document.getElementById('tab-login').classList.toggle('active', tab === 'login');
+  document.getElementById('tab-register').classList.toggle('active', tab === 'register');
+  document.getElementById('login-view').style.display = tab === 'login' ? 'block' : 'none';
+  document.getElementById('register-view').style.display = tab === 'register' ? 'block' : 'none';
+}
+
+function renderAuthStatus() {
+  const statusEl = document.getElementById('auth-status');
+  const loginView = document.getElementById('login-view');
+  const registerView = document.getElementById('register-view');
+  const loggedInView = document.getElementById('loggedin-view');
+  const tabs = document.querySelector('.tabs');
+  if (token) {
+    statusEl.textContent = 'Signed in as ';
+    const emailEl = document.createElement('b');
+    emailEl.textContent = userEmail;
+    statusEl.appendChild(emailEl);
+    tabs.style.display = 'none';
+    loginView.style.display = 'none';
+    registerView.style.display = 'none';
+    loggedInView.style.display = 'block';
+    document.getElementById('loggedin-email').textContent = userEmail;
+  } else {
+    statusEl.textContent = 'Not signed in';
+    tabs.style.display = 'flex';
+    loggedInView.style.display = 'none';
+    setAuthTab('login');
+  }
+}
+
+async function handleLogin(evt) {
+  evt.preventDefault();
+  const email = document.getElementById('login-email').value;
+  const password = document.getElementById('login-password').value;
+  try {
+    const res = await api('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+    onAuthSuccess(res);
+  } catch (e) {
+    showMessage(e.message);
+  }
+  return false;
+}
+
+async function handleRegister(evt) {
+  evt.preventDefault();
+  const firstName = document.getElementById('register-first').value;
+  const lastName = document.getElementById('register-last').value;
+  const email = document.getElementById('register-email').value;
+  const password = document.getElementById('register-password').value;
+  try {
+    const res = await api('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ email, password, firstName, lastName })
+    });
+    onAuthSuccess(res);
+    showMessage('Account created. Welcome!', 'info');
+  } catch (e) {
+    showMessage(e.message);
+  }
+  return false;
+}
+
+function onAuthSuccess(res) {
+  token = res.token;
+  userEmail = res.email;
+  localStorage.setItem('demo_token', token);
+  localStorage.setItem('demo_email', userEmail);
+  renderAuthStatus();
+  loadCart();
+}
+
+function logout() {
+  token = null;
+  userEmail = null;
+  localStorage.removeItem('demo_token');
+  localStorage.removeItem('demo_email');
+  cart = null;
+  renderAuthStatus();
+  renderCart();
+}
+
+async function loadProducts() {
+  try {
+    const data = await api('/products');
+    products = Array.isArray(data) ? data : (data.content || []);
+    renderProducts();
+  } catch (e) {
+    showMessage('Could not load products: ' + e.message);
+  }
+}
+
+function renderProducts() {
+  const grid = document.getElementById('product-grid');
+  grid.innerHTML = '';
+  products.forEach(p => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    const outOfStock = !p.stockQuantity || p.stockQuantity <= 0;
+    const lowStock = p.stockQuantity > 0 && p.stockQuantity <= 5;
+    card.innerHTML = `
+      <div class="card-art" style="background:${colorFor(p.name)}">${p.name.charAt(0).toUpperCase()}</div>
+      <div class="card-body">
+        <h3>${escapeHtml(p.name)}</h3>
+        <p class="desc">${escapeHtml(p.description || '')}</p>
+        <div class="card-meta">
+          <span class="price">$${Number(p.price).toFixed(2)}</span>
+          <span class="stock ${outOfStock ? 'low' : (lowStock ? 'low' : '')}">${outOfStock ? 'Out of stock' : p.stockQuantity + ' in stock'}</span>
+        </div>
+        <button ${outOfStock ? 'disabled' : ''} onclick="addToCart(${p.id})">${token ? 'Add to cart' : 'Log in to buy'}</button>
+      </div>`;
+    grid.appendChild(card);
+  });
+}
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+async function addToCart(productId) {
+  if (!token) {
+    showMessage('Log in first to add items to your cart.');
+    return;
+  }
+  try {
+    cart = await api('/cart/items', { method: 'POST', body: JSON.stringify({ productId, quantity: 1 }) });
+    renderCart();
+    showMessage('Added to cart.', 'info');
+  } catch (e) {
+    showMessage(e.message);
+  }
+}
+
+async function loadCart() {
+  if (!token) { cart = null; renderCart(); return; }
+  try {
+    cart = await api('/cart');
+    renderCart();
+  } catch (e) {
+    showMessage('Could not load cart: ' + e.message);
+  }
+}
+
+function renderCart() {
+  const itemsEl = document.getElementById('cart-items');
+  const badge = document.getElementById('cart-badge');
+  const totalEl = document.getElementById('cart-total');
+  const checkoutBtn = document.getElementById('checkout-btn');
+  const items = (cart && cart.items) || [];
+
+  const count = items.reduce((sum, i) => sum + i.quantity, 0);
+  badge.style.display = count > 0 ? 'flex' : 'none';
+  badge.textContent = count;
+
+  if (items.length === 0) {
+    itemsEl.innerHTML = '<p class="cart-empty">Your cart is empty.</p>';
+    totalEl.textContent = '$0.00';
+    checkoutBtn.disabled = true;
+    return;
+  }
+
+  itemsEl.innerHTML = '';
+  items.forEach(i => {
+    const row = document.createElement('div');
+    row.className = 'cart-item';
+    row.innerHTML = `
+      <div class="cart-item-top"><span>${escapeHtml(i.productName)}</span><span>$${Number(i.subtotal).toFixed(2)}</span></div>
+      <div class="cart-item-sub">
+        <div class="qty-controls">
+          <button class="small secondary" onclick="changeQty(${i.id}, ${i.quantity - 1})">&minus;</button>
+          <span>${i.quantity}</span>
+          <button class="small secondary" onclick="changeQty(${i.id}, ${i.quantity + 1})">+</button>
+        </div>
+        <button class="link" onclick="removeItem(${i.id})">Remove</button>
+      </div>`;
+    itemsEl.appendChild(row);
+  });
+  totalEl.textContent = '$' + Number(cart.total).toFixed(2);
+  checkoutBtn.disabled = false;
+}
+
+async function changeQty(cartItemId, newQty) {
+  try {
+    if (newQty <= 0) {
+      await removeItem(cartItemId);
+      return;
+    }
+    cart = await api('/cart/items/' + cartItemId + '?quantity=' + newQty, { method: 'PATCH' });
+    renderCart();
+  } catch (e) {
+    showMessage(e.message);
+  }
+}
+
+async function removeItem(cartItemId) {
+  try {
+    await api('/cart/items/' + cartItemId, { method: 'DELETE' });
+    await loadCart();
+  } catch (e) {
+    showMessage(e.message);
+  }
+}
+
+function toggleCart() {
+  document.getElementById('cart-drawer').classList.toggle('open');
+  document.getElementById('overlay').classList.toggle('open');
+}
+
+async function ensureAddress() {
+  const addresses = await api('/addresses');
+  if (addresses && addresses.length > 0) return addresses[0].id;
+  const created = await api('/addresses', {
+    method: 'POST',
+    body: JSON.stringify({
+      street: '123 Demo Street',
+      city: 'Faketown',
+      stateOrProvince: 'CA',
+      postalCode: '90210',
+      country: 'US'
+    })
+  });
+  return created.id;
+}
+
+async function checkout() {
+  if (!token) {
+    showMessage('Log in first to check out.');
+    return;
+  }
+  const checkoutBtn = document.getElementById('checkout-btn');
+  checkoutBtn.disabled = true;
+  try {
+    const addressId = await ensureAddress();
+    const order = await api('/orders', {
+      method: 'POST',
+      body: JSON.stringify({ shippingAddressId: addressId })
+    });
+    const session = await api('/orders/' + order.id + '/checkout-session', { method: 'POST' });
+    window.location = session.url;
+  } catch (e) {
+    if (e.code === 'PAYMENTS_UNAVAILABLE') {
+      showMessage('Payments not configured — your order was saved as PENDING. Set the Stripe test keys (see README) to complete checkout.', 'info');
+    } else {
+      showMessage(e.message);
+    }
+    await loadCart();
+  } finally {
+    checkoutBtn.disabled = !cart || !cart.items || cart.items.length === 0;
+  }
+}
+
+renderAuthStatus();
+loadProducts();
+loadCart();
+</script>
+</body>
+</html>

@@ -17,6 +17,18 @@ class StaticPagesSecurityTest {
     private MockMvc mockMvc;
 
     @Test
+    void rootPage_unauthenticated_returns200() throws Exception {
+        mockMvc.perform(get("/"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void indexHtml_unauthenticated_returns200() throws Exception {
+        mockMvc.perform(get("/index.html"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void checkoutSuccessPage_unauthenticated_returns200() throws Exception {
         mockMvc.perform(get("/checkout-success.html"))
                 .andExpect(status().isOk());

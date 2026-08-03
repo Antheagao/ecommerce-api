@@ -65,7 +65,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/**").authenticated()
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
                         .requestMatchers("/actuator/**").hasRole("ADMIN")
-                        .requestMatchers("/", "/error", "/favicon.ico").permitAll()
+                        .requestMatchers("/", "/index.html", "/error", "/favicon.ico").permitAll()
                         .requestMatchers("/checkout-success.html", "/checkout-cancel.html").permitAll()
                         .anyRequest().denyAll())
                 .exceptionHandling(e -> e

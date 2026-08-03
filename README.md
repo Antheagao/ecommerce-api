@@ -44,6 +44,10 @@ That's it. The app comes up on `http://localhost:8080` once Postgres passes its 
 
 `docker-compose.yml` uses `${VAR:?message}` guards on every required variable — if `.env` is missing or incomplete, `docker compose up` fails immediately with a clear error instead of starting with blank credentials. The four Stripe variables are deliberately *not* guarded (`${VAR:-}`) — the app boots fine with none of them set; the checkout, webhook, and refund endpoints just return `503` until real test-mode values are provided. See [Payments (Stripe)](#payments-stripe) for local setup.
 
+### Demo storefront
+
+`src/main/resources/static/index.html` is a thin, honest demo client for the API — plain HTML/CSS/JS, no framework, no build step — so the endpoints above have somewhere to be exercised from a browser instead of curl. After `docker compose up --build`, run `.\scripts\seed-demo.ps1` to create a demo shopper, an admin, and a small catalog, then open `http://localhost:8080`. Checkout only completes end-to-end with Stripe test keys configured (see [Payments (Stripe)](#payments-stripe)); without them the order is still created as `PENDING` (cart empties, stock decrements) and the page explains that payments aren't configured.
+
 ---
 
 ## Payments (Stripe)
