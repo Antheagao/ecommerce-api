@@ -2,93 +2,90 @@
 
 [![CI](https://github.com/Antheagao/ecommerce-api/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Antheagao/ecommerce-api/actions/workflows/ci.yml)
 
-A production-oriented REST API for an ecommerce platform, built with **Spring Boot 4**, **Java 21**, and **PostgreSQL**. The API supports catalog management, shopping cart, orders, JWT authentication, role-based access (USER/ADMIN), pagination, filtering, and OpenAPI documentation.
+A layered REST API for an ecommerce platform — JWT auth, role-based access, catalog, cart, and orders — built with Spring Boot 4 and PostgreSQL. Payments (Stripe Checkout + webhooks) are the next milestone; see [Roadmap](#roadmap).
 
 ---
 
-## Features
+## Quick Start
 
-### Authentication & Authorization
-- **JWT-based authentication** — Stateless; login and register return a Bearer token.
-- **Role-based access control** — `ROLE_USER` and `ROLE_ADMIN`; category and product create/update/delete restricted to ADMIN; GET on catalog is public.
-- **Custom user principal** — `CurrentUser` exposes `id` and `email` for controller logic.
-- **BCrypt password hashing** — Passwords never stored in plain text.
+Requires Docker and Docker Compose.
 
-### Catalog
-- **Categories** — CRUD, optional parent category (hierarchy), unique slug, auto-slug from name.
-- **Products** — CRUD, SKU, price, stock, category link; list with **pagination** and **filtering** by category, price range, and search (name/description).
+```bash
+cp .env.example .env
+docker compose up --build
+```
 
-### Cart & Orders
-- **Shopping cart** — Per-user cart; add/update/remove items; quantity and unit-price snapshot; clear cart.
-- **Orders** — Create from cart or from explicit line items; shipping address snapshot; **order status workflow** (PENDING → PAID → SHIPPED → DELIVERED, or CANCELLED) with `PATCH /api/orders/{id}/status`; optional **payment reference** stored on order.
-- **Order numbers** — DB-backed sequence (`order_number_seq`) with pessimistic lock for **multi-instance safety**.
+That's it. The app comes up on `http://localhost:8080` once Postgres passes its healthcheck.
 
-### User & Addresses
-- **User profile** — `GET /api/users/me` returns current user (no password).
-- **Addresses** — CRUD for shipping/billing addresses scoped to the authenticated user; used when creating orders.
+- API base: `http://localhost:8080/api`
+- Swagger UI: `http://localhost:8080/swagger-ui.html`
+- Health: `http://localhost:8080/actuator/health`
 
-### API Design & Quality
-- **Consistent error handling** — `ErrorResponse` (code, message, details); `ResourceNotFoundException` → 404, `ConflictException` → 409, validation errors → 400 with field details.
-- **Validation** — Jakarta Bean Validation on request DTOs (`@Valid`, `@NotBlank`, `@Email`, `@Size`, `@DecimalMin`, etc.).
-- **OpenAPI / Swagger** — Interactive docs at `/swagger-ui.html`, JSON at `/v3/api-docs`; JWT bearer scheme configured.
+**Without Docker:** `.\mvnw.cmd spring-boot:run` works too, but you'll need a local Postgres instance and matching `DB_URL`/`DB_USERNAME`/`DB_PASSWORD` — see the comments in `.env.example` for pointing a local run at the compose Postgres instead.
 
-### Scalability & Operations
-- **Stateless** — No server-side session; safe to run multiple instances behind a load balancer.
-- **Pagination** — Categories, products, and orders support `?paged=true&page=0&size=20`.
-- **Product filtering** — `categoryId`, `minPrice`, `maxPrice`, `search` (name/description).
-- **Profiles** — `application-dev.properties` and `application-prod.properties`; prod uses env for JWT secret and DB.
-- **Connection pooling** — HikariCP (default); tunable for production.
+### Environment variables (`.env.example`)
+
+| Variable | Default | Notes |
+|---|---|---|
+| `POSTGRES_DB` | `ecommerce` | Database name |
+| `POSTGRES_USER` | `postgres` | Database user |
+| `POSTGRES_PASSWORD` | `postgres` | Database password |
+| `POSTGRES_HOST_PORT` | `5435` | Host-side port mapping; container always listens on 5432 internally |
+| `APP_HOST_PORT` | `8080` | Host-side port for the app container |
+| `DB_URL` | `jdbc:postgresql://db:5432/${POSTGRES_DB}` | Composed automatically by `docker-compose.yml` for the `app` service |
+| `DB_USERNAME` | — | Set from `POSTGRES_USER` by compose |
+| `DB_PASSWORD` | — | Set from `POSTGRES_PASSWORD` by compose |
+| `JWT_SECRET` | — | **Required**, minimum 256 bits. No default — compose fails fast rather than booting insecurely |
+| `JWT_EXPIRATION_MS` | `86400000` | Token lifetime in ms (24h) |
+
+`docker-compose.yml` uses `${VAR:?message}` guards on every required variable — if `.env` is missing or incomplete, `docker compose up` fails immediately with a clear error instead of starting with blank credentials.
+
+---
+
+## Current State
+
+- **Auth** — JWT-based, stateless; `USER` and `ADMIN` roles.
+- **7 resource areas** — auth, users, addresses, cart, categories, products, orders.
+- **Layered architecture** — controllers → services → repositories, with DTOs at the API boundary.
+- **Order numbers** — generated via a DB-backed sequence table with pessimistic locking, safe across multiple app instances.
+- **Pagination** — supported on catalog and order list endpoints.
+- **Tests** — 151 tests across service and controller layers. JaCoCo line coverage: service 91.9%, controller 92.5%, overall 82.2%.
+- **CI** — GitHub Actions runs the build and test suite on every push and PR (badge above).
+- **Docker** — multi-stage build, non-root runtime user, container healthcheck on `/actuator/health`.
 
 ---
 
 ## Tech Stack
 
-| Layer        | Technology |
-|-------------|------------|
-| Runtime     | Java 21    |
-| Framework   | Spring Boot 4.0.2 |
-| Web         | Spring Web MVC, Spring Validation |
-| Data        | Spring Data JPA, Hibernate 7.x, PostgreSQL |
-| Security    | Spring Security 6, JWT (jjwt 0.12.x), BCrypt |
-| API Docs    | Springdoc OpenAPI 2.8 (Swagger UI) |
-| Build       | Maven |
-| Test        | JUnit 5, Spring Boot Test, H2 (test scope) |
+| Layer | Technology |
+|---|---|
+| Runtime | Java 21 |
+| Framework | Spring Boot 4.0.2 |
+| Security | Spring Security 7, JWT (jjwt 0.12.6), BCrypt |
+| Data | Spring Data JPA / Hibernate, PostgreSQL 16 (H2 for tests) |
+| API Docs | springdoc-openapi 2.8.6 (Swagger UI) |
+| Coverage | JaCoCo 0.8.13 |
+| Build | Maven (wrapper — `.\mvnw.cmd`) |
+| Test | JUnit 5, Spring Boot Test, MockMvc |
 
 ---
 
 ## API Overview
 
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|--------------|
-| POST   | `/api/auth/register` | No  | Register; returns JWT |
-| POST   | `/api/auth/login`    | No  | Login; returns JWT |
-| GET    | `/api/users/me`      | Yes | Current user profile |
-| GET    | `/api/categories`     | No  | List categories (optional `?paged=true`) |
-| GET    | `/api/categories/{id}`| No  | Get category |
-| POST   | `/api/categories`     | Admin | Create category |
-| PUT    | `/api/categories/{id}`| Admin | Update category |
-| DELETE | `/api/categories/{id}`| Admin | Delete category |
-| GET    | `/api/products`       | No  | List products (optional `paged`, `categoryId`, `minPrice`, `maxPrice`, `search`) |
-| GET    | `/api/products/{id}`  | No  | Get product |
-| POST   | `/api/products`       | Admin | Create product |
-| PUT    | `/api/products/{id}`  | Admin | Update product |
-| DELETE | `/api/products/{id}`  | Admin | Delete product |
-| GET    | `/api/addresses`       | Yes | List my addresses |
-| GET    | `/api/addresses/{id}` | Yes | Get address |
-| POST   | `/api/addresses`      | Yes | Create address |
-| PUT    | `/api/addresses/{id}` | Yes | Update address |
-| DELETE | `/api/addresses/{id}` | Yes | Delete address |
-| GET    | `/api/cart`           | Yes | Get my cart |
-| POST   | `/api/cart/items`     | Yes | Add item (body: `productId`, `quantity`) |
-| PATCH  | `/api/cart/items/{id}`| Yes | Update quantity (`?quantity=`) |
-| DELETE | `/api/cart/items/{id}`| Yes | Remove item |
-| DELETE | `/api/cart`           | Yes | Clear cart |
-| GET    | `/api/orders`         | Yes | List my orders (optional `?paged=true`) |
-| GET    | `/api/orders/{id}`    | Yes | Get order |
-| POST   | `/api/orders`         | Yes | Create order (from cart or body with `shippingAddressId` + optional `items`) |
-| PATCH  | `/api/orders/{id}/status` | Yes | Update status (body: `status`, optional `paymentReference`) |
+| Resource | Endpoints | Auth |
+|---|---|---|
+| Auth | `POST /api/auth/register`, `POST /api/auth/login` | Public |
+| Users | `GET /api/users/me` | Authenticated |
+| Addresses | Full CRUD (`GET`/`POST`/`PUT`/`DELETE /api/addresses[/{id}]`) | Authenticated, user-scoped |
+| Cart | `GET /api/cart`, `POST /api/cart/items`, `PATCH /api/cart/items/{id}`, `DELETE /api/cart/items/{id}`, `DELETE /api/cart` (clear) | Authenticated, user-scoped |
+| Categories | `GET /api/categories[/{id}]` public; `POST`/`PUT`/`DELETE` | ADMIN for writes |
+| Products | `GET /api/products[/{id}]` public; `POST`/`PUT`/`DELETE` | ADMIN for writes |
+| Orders | `GET /api/orders`, `GET /api/orders/{id}`, `POST /api/orders`, `PATCH /api/orders/{id}/status` | Authenticated, user-scoped |
+| Docs | `/swagger-ui.html`, `/v3/api-docs` | Public |
+| Ops | `/actuator/health` | Public |
+| Ops | Remaining actuator endpoints | ADMIN |
 
-**Authentication:** Send `Authorization: Bearer <token>` for protected endpoints.
+Send `Authorization: Bearer <token>` for any non-public endpoint.
 
 ---
 
@@ -102,54 +99,25 @@ src/main/java/com/antheagao/ecommerce_api/
 ├── entity/          # JPA entities (User, Product, Category, Order, Cart, etc.)
 ├── exception/       # Custom exceptions, GlobalExceptionHandler, ErrorResponse
 ├── repository/      # Spring Data JPA repositories
-├── security/       # JwtUtil, JwtAuthFilter, CustomUserDetailsService, CurrentUser
-└── service/        # Business logic
+├── security/        # JwtUtil, JwtAuthFilter, CustomUserDetailsService, CurrentUser
+└── service/         # Business logic
 ```
 
 ---
 
-## Getting Started
+## Running Tests
 
-### Prerequisites
-- **Java 21**
-- **PostgreSQL** (e.g. local instance with database `ecommerce`)
-
-### Configuration
-Copy or edit `src/main/resources/application.properties`:
-
-```properties
-spring.datasource.url=jdbc:postgresql://localhost:5432/ecommerce
-spring.datasource.username=postgres
-spring.datasource.password=postgres
-app.jwt.secret=your-256-bit-secret
-```
-
-For production, use environment variables (see `application-prod.properties`):
-- `JWT_SECRET` (required in prod)
-- `JWT_EXPIRATION_MS` (optional, default 24h)
-
-### Run
 ```bash
-mvn spring-boot:run
+.\mvnw.cmd test
 ```
 
-API base: `http://localhost:8080`  
-Swagger UI: `http://localhost:8080/swagger-ui.html`
-
-### Run Tests
-```bash
-mvn test
-```
-Tests use H2 in-memory and `src/test/resources/application.properties`.
+Tests run against H2 in-memory with `src/test/resources/application.properties`; JaCoCo produces a coverage report under `target/site/jacoco` on `mvn verify`.
 
 ---
 
-## Design Highlights
+## Roadmap
 
-- **Layered architecture** — Controllers → Services → Repositories; DTOs for API boundary; entities for persistence.
-- **Security** — Stateless JWT filter; method security (`@PreAuthorize`) where needed; public read for catalog, authenticated write for user resources, ADMIN for catalog mutations.
-- **Idempotent order numbers** — Sequence table with lock to avoid duplicates across instances.
-- **Order status transitions** — Validated state machine (e.g. PENDING → PAID → SHIPPED → DELIVERED) to keep data consistent.
+Stripe Checkout + webhook-driven payments (idempotent event handling, order state machine, admin refunds) are the next milestone. Deployment, structured payment-path logging, and architecture/sequence diagrams follow once that lands.
 
 ---
 
