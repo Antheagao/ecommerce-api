@@ -45,6 +45,18 @@ public class StripeWebhookService {
     private final OrderRepository orderRepository;
     private final OrderService orderService;
 
+    /**
+     * True iff eventId is already recorded in the idempotency ledger. Used by StripeWebhookController
+     * to distinguish a genuine replay (expected, 200) from any other DataIntegrityViolationException
+     * process() might throw (e.g. an FK/not-null violation from a future schema change) -- conflating
+     * the two would silently swallow a real integrity failure as "replay" and stop Stripe from
+     * retrying it.
+     */
+    @Transactional(readOnly = true)
+    public boolean isAlreadyProcessed(String eventId) {
+        return processedStripeEventRepository.existsById(eventId);
+    }
+
     @Transactional
     public void process(Event event) {
         Long orderId = resolveOrderIdBestEffort(event);

@@ -11,6 +11,7 @@ import com.antheagao.ecommerce_api.exception.ServiceUnavailableException;
 import com.antheagao.ecommerce_api.repository.OrderRepository;
 import com.stripe.StripeClient;
 import com.stripe.exception.ApiException;
+import com.stripe.exception.InvalidRequestException;
 import com.stripe.model.Refund;
 import com.stripe.net.RequestOptions;
 import com.stripe.param.RefundCreateParams;
@@ -173,5 +174,29 @@ class RefundServiceTest {
                 .isInstanceOf(ServiceUnavailableException.class);
 
         verify(orderService, never()).transitionSystem(any(), any(), any());
+    }
+
+    @Test
+    void refund_whenChargeAlreadyRefundedOnStripe_healsOrderInsteadOfThrowing() throws Exception {
+        RefundService service = new RefundService(stripeClient, configuredProperties(), orderRepository, orderService);
+        Order order = orderWith(OrderStatus.PAID, "pi_test_abc");
+        when(orderRepository.findById(10L)).thenReturn(Optional.of(order));
+        when(stripeClient.refunds()).thenReturn(stripeRefundsService);
+        // Constructor verified via javap -l (LocalVariableTable) against the 33.2.0 jar:
+        // InvalidRequestException(String message, String param, String requestId, String code,
+        // Integer statusCode, Throwable e).
+        when(stripeRefundsService.create(any(RefundCreateParams.class), any(RequestOptions.class)))
+                .thenThrow(new InvalidRequestException(
+                        "The charge has already been refunded.", null, "req_123", "charge_already_refunded", 400, null));
+
+        RefundResponse response = service.refund(10L);
+
+        assertThat(response.getOrderId()).isEqualTo(10L);
+        assertThat(response.getOrderNumber()).isEqualTo("ORD-00042");
+        assertThat(response.getRefundId()).isNull();
+        assertThat(response.getRefundStatus()).isEqualTo("already_refunded");
+        assertThat(response.getOrderStatus()).isEqualTo(OrderStatus.REFUNDED);
+
+        verify(orderService).transitionSystem(eq(10L), eq(OrderStatus.REFUNDED), isNull());
     }
 }

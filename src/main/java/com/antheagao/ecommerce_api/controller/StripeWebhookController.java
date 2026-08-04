@@ -84,11 +84,18 @@ public class StripeWebhookController {
             try {
                 stripeWebhookService.process(event);
             } catch (DataIntegrityViolationException e) {
-                // Replay of an already-processed event id (unique constraint on
-                // processed_stripe_events.event_id). StripeWebhookService.process() is @Transactional and
-                // rollback-only once this escapes it, so the catch has to live out here.
-                log.info("event=stripe.webhook.outcome outcome=replay type={}", event.getType());
-                return ResponseEntity.ok().build();
+                // StripeWebhookService.process() is @Transactional and rollback-only once this escapes
+                // it, so the catch has to live out here. A DataIntegrityViolationException here is NOT
+                // necessarily a replay -- it's only a replay if this event id is already in the ledger
+                // (the unique constraint on processed_stripe_events.event_id). Any other integrity
+                // violation (e.g. an FK/not-null violation from a future schema change) must not be
+                // silently swallowed as "replay", or Stripe would never retry it.
+                if (stripeWebhookService.isAlreadyProcessed(event.getId())) {
+                    log.info("event=stripe.webhook.outcome outcome=replay type={}", event.getType());
+                    return ResponseEntity.ok().build();
+                }
+                log.error("event=stripe.webhook.integrity_violation type={}", event.getType(), e);
+                return ResponseEntity.internalServerError().build();
             }
 
             log.info("event=stripe.webhook.outcome outcome=processed type={}", event.getType());

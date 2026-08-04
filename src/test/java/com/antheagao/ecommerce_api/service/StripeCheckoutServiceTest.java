@@ -250,6 +250,29 @@ class StripeCheckoutServiceTest {
     }
 
     @Test
+    void createSession_whenStripeThrowsIdempotencyError_stillWrapsInServiceUnavailableException() throws Exception {
+        StripeCheckoutService service = new StripeCheckoutService(stripeClient, configuredProperties(), orderRepository);
+        Order order = orderWith(BigDecimal.ZERO, BigDecimal.ZERO);
+        when(orderRepository.findWithUserAndItemsById(10L)).thenReturn(Optional.of(order));
+        when(stripeClient.checkout()).thenReturn(checkoutService);
+        when(checkoutService.sessions()).thenReturn(sessionService);
+        // IdempotencyException, not InvalidRequestException with a code: Stripe models
+        // idempotency_error as an error TYPE, and the 33.2.0 SDK dispatches it to this exception
+        // class with getCode()=null -- the production branch checks the type, so the test must throw
+        // the real thing. Constructor verified via javap against the 33.2.0 jar:
+        // IdempotencyException(String message, String requestId, String code, Integer statusCode).
+        when(sessionService.create(any(SessionCreateParams.class), any(RequestOptions.class)))
+                .thenThrow(new com.stripe.exception.IdempotencyException(
+                        "Keys for idempotent requests can only be used with the same parameters they were first used with.",
+                        "req_123", null, 400));
+
+        assertThatThrownBy(() -> service.createSession(1L, 10L))
+                .isInstanceOf(ServiceUnavailableException.class);
+
+        verify(orderRepository, never()).setStripeSessionId(any(), any());
+    }
+
+    @Test
     void createSession_whenTaxNegative_throwsIllegalStateExceptionAndNeverCallsStripe() {
         StripeCheckoutService service = new StripeCheckoutService(stripeClient, configuredProperties(), orderRepository);
         Order order = orderWith(new BigDecimal("-1.00"), BigDecimal.ZERO);

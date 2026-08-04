@@ -76,7 +76,21 @@ public class StripeCheckoutService {
             try {
                 session = stripeClient.checkout().sessions().create(params, requestOptions);
             } catch (StripeException e) {
-                log.error("event=checkout.session.creation_failed", e);
+                // instanceof, not e.getCode().equals("idempotency_error"): idempotency_error is an
+                // error TYPE in Stripe's model, not a code -- the SDK dispatches type=idempotency_error
+                // to IdempotencyException and getCode() stays null (verified against 33.2.0 bytecode),
+                // so a code-string check would never fire.
+                if (e instanceof com.stripe.exception.IdempotencyException) {
+                    // Distinct from event=checkout.session.creation_failed: this isn't a Stripe outage,
+                    // it's the success/cancel URL config (or other session params) having changed within
+                    // Stripe's 24h idempotency window while order.getOrderNumber() was still live as an
+                    // idempotency key, so the same key now maps to different params. Still 503 either
+                    // way -- OrderControllerTest and the storefront depend on that -- but a config-drift
+                    // cause shouldn't get buried under the catch-all label.
+                    log.error("event=checkout.session.idempotency_key_conflict", e);
+                } else {
+                    log.error("event=checkout.session.creation_failed", e);
+                }
                 throw new ServiceUnavailableException("Unable to start checkout");
             }
             long durationMs = (System.nanoTime() - startNanos) / 1_000_000;

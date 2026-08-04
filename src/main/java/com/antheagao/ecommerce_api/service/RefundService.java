@@ -83,6 +83,22 @@ public class RefundService {
             try {
                 refund = stripeClient.refunds().create(params, requestOptions);
             } catch (StripeException e) {
+                if ("charge_already_refunded".equals(e.getCode())) {
+                    // Stripe already refunded this charge (e.g. via Dashboard, or a local commit died
+                    // after a successful Stripe refund and the retry landed after the idempotency key's
+                    // 24h window expired) -- the order being stuck PAID forever would be wrong here, not
+                    // a transient Stripe outage. Heal by applying the same REFUNDED transition this
+                    // method applies on a fresh refund, just without a new Stripe refund id to report.
+                    log.warn("event=refund.already_refunded_on_stripe orderId={}", orderId);
+                    orderService.transitionSystem(orderId, OrderStatus.REFUNDED, null);
+                    return RefundResponse.builder()
+                            .orderId(order.getId())
+                            .orderNumber(order.getOrderNumber())
+                            .refundId(null)
+                            .refundStatus("already_refunded")
+                            .orderStatus(OrderStatus.REFUNDED)
+                            .build();
+                }
                 log.error("event=refund.failed", e);
                 throw new ServiceUnavailableException("Unable to process refund");
             }

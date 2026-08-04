@@ -16,6 +16,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -113,11 +114,26 @@ class StripeWebhookControllerTest {
         String payload = samplePayload();
         String header = signedHeader(payload, SECRET);
         doThrow(new DataIntegrityViolationException("duplicate event_id")).when(stripeWebhookService).process(any(Event.class));
+        when(stripeWebhookService.isAlreadyProcessed("evt_test_1")).thenReturn(true);
 
         mockMvc.perform(post("/api/stripe/webhook")
                         .contentType(MediaType.APPLICATION_JSON)
                         .header("Stripe-Signature", header)
                         .content(payload))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void genuineIntegrityViolation_eventNotInLedger_returns500() throws Exception {
+        String payload = samplePayload();
+        String header = signedHeader(payload, SECRET);
+        doThrow(new DataIntegrityViolationException("not-null constraint violated")).when(stripeWebhookService).process(any(Event.class));
+        when(stripeWebhookService.isAlreadyProcessed("evt_test_1")).thenReturn(false);
+
+        mockMvc.perform(post("/api/stripe/webhook")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .header("Stripe-Signature", header)
+                        .content(payload))
+                .andExpect(status().is5xxServerError());
     }
 }
