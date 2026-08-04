@@ -327,6 +327,7 @@ function onAuthSuccess(res) {
   localStorage.setItem('demo_token', token);
   localStorage.setItem('demo_email', userEmail);
   renderAuthStatus();
+  renderProducts(); // button labels depend on token ("Log in to buy" vs "Add to cart")
   loadCart();
 }
 
@@ -337,6 +338,7 @@ function logout() {
   localStorage.removeItem('demo_email');
   cart = null;
   renderAuthStatus();
+  renderProducts(); // flip button labels back to "Log in to buy"
   renderCart();
 }
 
