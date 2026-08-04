@@ -2,7 +2,11 @@
 
 [![CI](https://github.com/Antheagao/ecommerce-api/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Antheagao/ecommerce-api/actions/workflows/ci.yml)
 
-A layered REST API for an ecommerce platform — JWT auth, role-based access, catalog, cart, orders, and Stripe-backed payments — built with Spring Boot 4 and PostgreSQL. Checkout, signed/idempotent webhooks, and admin refunds are fully wired; see [Payments (Stripe)](#payments-stripe). Deployment and a live demo are the last milestone; see [Roadmap](#roadmap).
+A layered REST API for an ecommerce platform — JWT auth, role-based access, catalog, cart, orders, and Stripe-backed payments — built with Spring Boot 4 and PostgreSQL. Checkout, signed/idempotent webhooks, and admin refunds are fully wired; see [Payments (Stripe)](#payments-stripe). Runs locally in two commands — see [Quick Start](#quick-start).
+
+![Demo: browsing the storefront, logging in, adding items, and reviewing the cart](docs/media/storefront-demo.gif)
+
+*The bundled [demo storefront](#demo-storefront) exercising the API: browse → log in → add to cart → review. Recorded against `docker compose up` with the seeded demo catalog.*
 
 ---
 
@@ -152,7 +156,7 @@ Without any Stripe env set, the app still boots fine — `checkout-session` and 
 - **Order numbers** — generated via a DB-backed sequence table with pessimistic locking, safe across multiple app instances.
 - **Pagination** — supported on catalog and order list endpoints.
 - **Database migrations** — Flyway (`db/migration`), `ddl-auto=validate` — schema changes are explicit, versioned SQL, not Hibernate-inferred DDL.
-- **Tests** — 258 tests across service, controller, and full-stack layers, including a webhook failure-mode suite (duplicate delivery, webhook-before-redirect, amount/session-identity mismatches, signature failures, partial-then-full refunds) run against a real Postgres via Testcontainers. JaCoCo line coverage: service 94.2%, controller 95.5%, overall 88.6%; the three Stripe classes (`StripeCheckoutService`, `StripeWebhookService`, `StripeWebhookController`) are individually at 100% line coverage.
+- **Tests** — 261 tests across service, controller, and full-stack layers, including a webhook failure-mode suite (duplicate delivery, webhook-before-redirect, amount/session-identity mismatches, signature failures, partial-then-full refunds) run against a real Postgres via Testcontainers. JaCoCo line coverage: service 94.2%, controller 95.5%, overall 88.6%; the three Stripe classes (`StripeCheckoutService`, `StripeWebhookService`, `StripeWebhookController`) are individually at 100% line coverage.
 - **CI** — GitHub Actions runs the full `mvn verify` (build, tests, Testcontainers, JaCoCo) on every push and PR (badge above).
 - **Docker** — multi-stage build, non-root runtime user, container healthcheck on `/actuator/health`.
 
@@ -226,13 +230,13 @@ Most tests run against H2 in-memory with `src/test/resources/application.propert
 
 ## Roadmap
 
-Stripe Checkout, idempotent/signature-verified webhooks, the payment-driven order state machine, and admin refunds are done — 258 tests green in CI, including a dedicated webhook failure-mode suite (see [Payments (Stripe)](#payments-stripe)).
+Stripe Checkout, idempotent/signature-verified webhooks, the payment-driven order state machine, and admin refunds are done — 261 tests green in CI, including a dedicated webhook failure-mode suite (see [Payments (Stripe)](#payments-stripe)). This project is deliberately local-first: no hosted deployment is planned — `docker compose up` plus the seeded demo storefront *is* the demo.
 
 What's left:
 
-- **Deploy** (Fly.io/Railway/Render) with Docker, a seeded demo account, and Stripe test keys so a recruiter can complete a real end-to-end checkout.
-- **Structured logging** on the payment path, and `/actuator/health` wired into the deploy target's health checks.
-- **Architecture diagram** in this README once the deploy target is chosen.
+- **Structured logging** on the payment path.
+- **Architecture diagram** in this README.
+- **Payment-moment demo media** — extending the storefront GIF through a full `4242 4242 4242 4242` checkout to `PAID` once Stripe test-mode keys are configured locally (`stripe listen` forwards the webhook; no hosting involved).
 
 ---
 
