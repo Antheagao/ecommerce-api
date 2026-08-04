@@ -93,7 +93,7 @@ class StripeCheckoutServiceTest {
     void createSession_whenValid_buildsSessionAndPersistsId() throws Exception {
         StripeCheckoutService service = new StripeCheckoutService(stripeClient, configuredProperties(), orderRepository);
         Order order = orderWith(BigDecimal.ZERO, BigDecimal.ZERO);
-        when(orderRepository.findById(10L)).thenReturn(Optional.of(order));
+        when(orderRepository.findWithUserAndItemsById(10L)).thenReturn(Optional.of(order));
 
         Session session = new Session();
         session.setId("cs_test_abc");
@@ -105,7 +105,7 @@ class StripeCheckoutServiceTest {
         assertThat(response.getSessionId()).isEqualTo("cs_test_abc");
         assertThat(response.getUrl()).isEqualTo("https://checkout.stripe.com/pay/cs_test_abc");
         // Persisted via the targeted setStripeSessionId(...) update, not save(order) -- save() would
-        // flush the whole findById()-loaded snapshot and could stomp a concurrent status transition.
+        // flush the whole findWithUserAndItemsById()-loaded snapshot and could stomp a concurrent status transition.
         verify(orderRepository).setStripeSessionId(10L, "cs_test_abc");
         verify(orderRepository, never()).save(any());
 
@@ -133,7 +133,7 @@ class StripeCheckoutServiceTest {
     void createSession_whenTaxAndShippingNonZero_addsLineItemsSummingToTotal() throws Exception {
         StripeCheckoutService service = new StripeCheckoutService(stripeClient, configuredProperties(), orderRepository);
         Order order = orderWith(new BigDecimal("3.50"), new BigDecimal("5.00"));
-        when(orderRepository.findById(10L)).thenReturn(Optional.of(order));
+        when(orderRepository.findWithUserAndItemsById(10L)).thenReturn(Optional.of(order));
 
         Session session = new Session();
         session.setId("cs_test_abc");
@@ -197,7 +197,7 @@ class StripeCheckoutServiceTest {
     @Test
     void createSession_whenOrderMissing_throwsResourceNotFoundException() {
         StripeCheckoutService service = new StripeCheckoutService(stripeClient, configuredProperties(), orderRepository);
-        when(orderRepository.findById(999L)).thenReturn(Optional.empty());
+        when(orderRepository.findWithUserAndItemsById(999L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.createSession(1L, 999L))
                 .isInstanceOf(ResourceNotFoundException.class)
@@ -210,7 +210,7 @@ class StripeCheckoutServiceTest {
     void createSession_whenWrongOwner_throwsResourceNotFoundException() {
         StripeCheckoutService service = new StripeCheckoutService(stripeClient, configuredProperties(), orderRepository);
         Order order = orderWith(BigDecimal.ZERO, BigDecimal.ZERO);
-        when(orderRepository.findById(10L)).thenReturn(Optional.of(order));
+        when(orderRepository.findWithUserAndItemsById(10L)).thenReturn(Optional.of(order));
 
         assertThatThrownBy(() -> service.createSession(999L, 10L))
                 .isInstanceOf(ResourceNotFoundException.class)
@@ -224,7 +224,7 @@ class StripeCheckoutServiceTest {
         StripeCheckoutService service = new StripeCheckoutService(stripeClient, configuredProperties(), orderRepository);
         Order order = orderWith(BigDecimal.ZERO, BigDecimal.ZERO);
         order.setStatus(OrderStatus.PAID);
-        when(orderRepository.findById(10L)).thenReturn(Optional.of(order));
+        when(orderRepository.findWithUserAndItemsById(10L)).thenReturn(Optional.of(order));
 
         assertThatThrownBy(() -> service.createSession(1L, 10L))
                 .isInstanceOf(ConflictException.class)
@@ -237,7 +237,7 @@ class StripeCheckoutServiceTest {
     void createSession_whenStripeThrows_wrapsInServiceUnavailableException() throws Exception {
         StripeCheckoutService service = new StripeCheckoutService(stripeClient, configuredProperties(), orderRepository);
         Order order = orderWith(BigDecimal.ZERO, BigDecimal.ZERO);
-        when(orderRepository.findById(10L)).thenReturn(Optional.of(order));
+        when(orderRepository.findWithUserAndItemsById(10L)).thenReturn(Optional.of(order));
         when(stripeClient.checkout()).thenReturn(checkoutService);
         when(checkoutService.sessions()).thenReturn(sessionService);
         when(sessionService.create(any(SessionCreateParams.class), any(RequestOptions.class)))
@@ -253,7 +253,7 @@ class StripeCheckoutServiceTest {
     void createSession_whenTaxNegative_throwsIllegalStateExceptionAndNeverCallsStripe() {
         StripeCheckoutService service = new StripeCheckoutService(stripeClient, configuredProperties(), orderRepository);
         Order order = orderWith(new BigDecimal("-1.00"), BigDecimal.ZERO);
-        when(orderRepository.findById(10L)).thenReturn(Optional.of(order));
+        when(orderRepository.findWithUserAndItemsById(10L)).thenReturn(Optional.of(order));
 
         assertThatThrownBy(() -> service.createSession(1L, 10L))
                 .isInstanceOf(IllegalStateException.class)
@@ -267,7 +267,7 @@ class StripeCheckoutServiceTest {
     void createSession_whenShippingNegative_throwsIllegalStateExceptionAndNeverCallsStripe() {
         StripeCheckoutService service = new StripeCheckoutService(stripeClient, configuredProperties(), orderRepository);
         Order order = orderWith(BigDecimal.ZERO, new BigDecimal("-2.00"));
-        when(orderRepository.findById(10L)).thenReturn(Optional.of(order));
+        when(orderRepository.findWithUserAndItemsById(10L)).thenReturn(Optional.of(order));
 
         assertThatThrownBy(() -> service.createSession(1L, 10L))
                 .isInstanceOf(IllegalStateException.class)

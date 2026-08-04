@@ -17,7 +17,6 @@ import com.stripe.param.checkout.SessionCreateParams;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 
@@ -30,7 +29,6 @@ public class StripeCheckoutService {
     private final StripeProperties stripeProperties;
     private final OrderRepository orderRepository;
 
-    @Transactional
     public CheckoutSessionResponse createSession(Long userId, Long orderId) {
         // Gate on the specific fields this call uses, not just isConfigured() (which only checks
         // secretKey) -- a blank successUrl/cancelUrl would still build a SessionCreateParams that
@@ -40,7 +38,12 @@ public class StripeCheckoutService {
             throw new ServiceUnavailableException("Payments are not configured");
         }
 
-        Order order = orderRepository.findById(orderId)
+        // Single short-lived query (auto-commit connection, released on return): the fetch-join loads user and items eagerly
+        // so nothing is lazy once this method returns and the persistence context closes. Everything
+        // that touches the entity -- ownership check, status check, buildParams, the idempotency key --
+        // must happen in here, before the Stripe call, since no tx (and no Hikari connection) is held
+        // across the network call below.
+        Order order = orderRepository.findWithUserAndItemsById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order", orderId));
         if (!order.getUser().getId().equals(userId)) {
             throw new ResourceNotFoundException("Order", orderId);
@@ -60,19 +63,22 @@ public class StripeCheckoutService {
                 // primarily anyway).
                 .setIdempotencyKey(order.getOrderNumber())
                 .build();
+        Long orderIdForUpdate = order.getId();
+        String orderNumber = order.getOrderNumber();
 
         Session session;
         try {
             session = stripeClient.checkout().sessions().create(params, requestOptions);
         } catch (StripeException e) {
-            log.error("Stripe Checkout Session creation failed for order {}", order.getOrderNumber(), e);
+            log.error("Stripe Checkout Session creation failed for order {}", orderNumber, e);
             throw new ServiceUnavailableException("Unable to start checkout");
         }
 
         // Targeted update, not orderRepository.save(order): save() would flush the whole entity as
         // loaded at the top of this method, which could stomp a status transition (admin PATCH, or
-        // S7's webhook handler) that lands concurrently between that load and this commit.
-        orderRepository.setStripeSessionId(order.getId(), session.getId());
+        // S7's webhook handler) that lands concurrently between that load and this commit. This is
+        // its own short tx now (see OrderRepository.setStripeSessionId) since no outer tx is held here.
+        orderRepository.setStripeSessionId(orderIdForUpdate, session.getId());
 
         return CheckoutSessionResponse.builder()
                 .sessionId(session.getId())
