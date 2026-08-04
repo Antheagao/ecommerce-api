@@ -16,6 +16,7 @@ import com.stripe.net.RequestOptions;
 import com.stripe.param.checkout.SessionCreateParams;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -45,45 +46,55 @@ public class StripeCheckoutService {
         // across the network call below.
         Order order = orderRepository.findWithUserAndItemsById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order", orderId));
-        if (!order.getUser().getId().equals(userId)) {
-            throw new ResourceNotFoundException("Order", orderId);
-        }
-        if (order.getStatus() != OrderStatus.PENDING) {
-            throw new ConflictException("Order " + order.getOrderNumber() + " is not PENDING (current status: " + order.getStatus() + ")");
-        }
-
-        SessionCreateParams params = buildParams(order);
-        RequestOptions requestOptions = RequestOptions.builder()
-                // Order number as the idempotency key: a double-click on "checkout" can't create two
-                // Stripe sessions for the same order. If the order already has a stripeSessionId (e.g.
-                // an earlier session expired), re-creating with the same key is still fine -- Stripe's
-                // idempotency window is 24h, sessions themselves expire well within that, and
-                // overwriting stripeSessionId below with the freshly returned id keeps
-                // findByStripeSessionId coherent (S7's webhook handling keys off metadata.orderId
-                // primarily anyway).
-                .setIdempotencyKey(order.getOrderNumber())
-                .build();
-        Long orderIdForUpdate = order.getId();
-        String orderNumber = order.getOrderNumber();
-
-        Session session;
+        MDC.put("orderNumber", order.getOrderNumber());
         try {
-            session = stripeClient.checkout().sessions().create(params, requestOptions);
-        } catch (StripeException e) {
-            log.error("Stripe Checkout Session creation failed for order {}", orderNumber, e);
-            throw new ServiceUnavailableException("Unable to start checkout");
+            if (!order.getUser().getId().equals(userId)) {
+                throw new ResourceNotFoundException("Order", orderId);
+            }
+            if (order.getStatus() != OrderStatus.PENDING) {
+                throw new ConflictException("Order " + order.getOrderNumber() + " is not PENDING (current status: " + order.getStatus() + ")");
+            }
+            // After the ownership check on purpose: logging it earlier would record another user's
+            // probe of this orderId as a legitimate checkout attempt on the victim's order.
+            log.info("event=checkout.session.requested orderId={}", orderId);
+
+            SessionCreateParams params = buildParams(order);
+            RequestOptions requestOptions = RequestOptions.builder()
+                    // Order number as the idempotency key: a double-click on "checkout" can't create two
+                    // Stripe sessions for the same order. If the order already has a stripeSessionId (e.g.
+                    // an earlier session expired), re-creating with the same key is still fine -- Stripe's
+                    // idempotency window is 24h, sessions themselves expire well within that, and
+                    // overwriting stripeSessionId below with the freshly returned id keeps
+                    // findByStripeSessionId coherent (S7's webhook handling keys off metadata.orderId
+                    // primarily anyway).
+                    .setIdempotencyKey(order.getOrderNumber())
+                    .build();
+            Long orderIdForUpdate = order.getId();
+
+            Session session;
+            long startNanos = System.nanoTime();
+            try {
+                session = stripeClient.checkout().sessions().create(params, requestOptions);
+            } catch (StripeException e) {
+                log.error("event=checkout.session.creation_failed", e);
+                throw new ServiceUnavailableException("Unable to start checkout");
+            }
+            long durationMs = (System.nanoTime() - startNanos) / 1_000_000;
+            log.info("event=checkout.session.created sessionId={} durationMs={}", session.getId(), durationMs);
+
+            // Targeted update, not orderRepository.save(order): save() would flush the whole entity as
+            // loaded at the top of this method, which could stomp a status transition (admin PATCH, or
+            // S7's webhook handler) that lands concurrently between that load and this commit. This is
+            // its own short tx now (see OrderRepository.setStripeSessionId) since no outer tx is held here.
+            orderRepository.setStripeSessionId(orderIdForUpdate, session.getId());
+
+            return CheckoutSessionResponse.builder()
+                    .sessionId(session.getId())
+                    .url(session.getUrl())
+                    .build();
+        } finally {
+            MDC.remove("orderNumber");
         }
-
-        // Targeted update, not orderRepository.save(order): save() would flush the whole entity as
-        // loaded at the top of this method, which could stomp a status transition (admin PATCH, or
-        // S7's webhook handler) that lands concurrently between that load and this commit. This is
-        // its own short tx now (see OrderRepository.setStripeSessionId) since no outer tx is held here.
-        orderRepository.setStripeSessionId(orderIdForUpdate, session.getId());
-
-        return CheckoutSessionResponse.builder()
-                .sessionId(session.getId())
-                .url(session.getUrl())
-                .build();
     }
 
     private SessionCreateParams buildParams(Order order) {

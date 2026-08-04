@@ -51,14 +51,14 @@ public class StripeWebhookService {
 
         processedStripeEventRepository.saveAndFlush(
                 new ProcessedStripeEvent(event.getId(), event.getType(), orderId));
+        log.info("event=stripe.webhook.recorded type={} orderId={}", event.getType(), orderId);
 
         switch (event.getType()) {
             case "checkout.session.completed" -> handleCheckoutSessionCompleted(event);
             case "checkout.session.expired" -> handleCheckoutSessionExpired(event);
             case "payment_intent.payment_failed" -> handlePaymentIntentPaymentFailed(event);
             case "charge.refunded" -> handleChargeRefunded(event);
-            default -> log.debug("Unhandled Stripe event type {} ({}) -- recorded, no action taken",
-                    event.getType(), event.getId());
+            default -> log.debug("event=stripe.webhook.unhandled type={}", event.getType());
         }
     }
 
@@ -66,13 +66,12 @@ public class StripeWebhookService {
         Session session = deserializeDataObject(event, Session.class);
         Long orderId = resolveOrderIdFromSession(session);
         if (orderId == null) {
-            log.error("checkout.session.completed {}: session {} has no resolvable order (metadata.orderId/clientReferenceId)",
-                    event.getId(), session.getId());
+            log.error("event=checkout.session.completed.unresolved sessionId={}", session.getId());
             return;
         }
         Order order = orderRepository.findById(orderId).orElse(null);
         if (order == null) {
-            log.warn("checkout.session.completed {}: order {} not found", event.getId(), orderId);
+            log.warn("event=checkout.session.completed.order_not_found orderId={}", orderId);
             return;
         }
 
@@ -81,8 +80,8 @@ public class StripeWebhookService {
         long expectedMinorUnits = order.getTotal().movePointRight(2).longValueExact();
         Long actualMinorUnits = session.getAmountTotal();
         if (actualMinorUnits == null || actualMinorUnits != expectedMinorUnits) {
-            log.error("checkout.session.completed {}: amount mismatch for order {} (expected {}, session {} had {})",
-                    event.getId(), orderId, expectedMinorUnits, session.getId(), actualMinorUnits);
+            log.error("event=checkout.session.completed.amount_mismatch orderId={} expected={} sessionId={} actual={}",
+                    orderId, expectedMinorUnits, session.getId(), actualMinorUnits);
             return;
         }
 
@@ -90,18 +89,18 @@ public class StripeWebhookService {
         // live 24h), so a superseded-but-still-live session completing must not pay an order that has
         // since moved on to a newer session.
         if (!session.getId().equals(order.getStripeSessionId())) {
-            log.warn("checkout.session.completed {}: session {} is not order {}'s current session ({}) -- superseded session, leaving order PENDING",
-                    event.getId(), session.getId(), orderId, order.getStripeSessionId());
+            log.warn("event=checkout.session.completed.superseded_session orderId={} sessionId={} currentSessionId={}",
+                    orderId, session.getId(), order.getStripeSessionId());
             return;
         }
 
         try {
             orderService.transitionSystem(orderId, OrderStatus.PAID, session.getPaymentIntent());
         } catch (InvalidTransitionException e) {
-            log.info("checkout.session.completed {}: order {} already {} -> {} not applicable, swallowing",
-                    event.getId(), orderId, e.getFrom(), e.getTo());
+            log.info("event=checkout.session.completed.transition_swallowed orderId={} from={} to={}",
+                    orderId, e.getFrom(), e.getTo());
         } catch (ResourceNotFoundException e) {
-            log.warn("checkout.session.completed {}: order {} not found during transition", event.getId(), orderId);
+            log.warn("event=checkout.session.completed.transition_order_not_found orderId={}", orderId);
         }
     }
 
@@ -109,17 +108,16 @@ public class StripeWebhookService {
         Session session = deserializeDataObject(event, Session.class);
         Long orderId = resolveOrderIdFromSession(session);
         if (orderId == null) {
-            log.error("checkout.session.expired {}: session {} has no resolvable order (metadata.orderId/clientReferenceId)",
-                    event.getId(), session.getId());
+            log.error("event=checkout.session.expired.unresolved sessionId={}", session.getId());
             return;
         }
         try {
             orderService.transitionSystem(orderId, OrderStatus.FAILED, null);
         } catch (InvalidTransitionException e) {
-            log.info("checkout.session.expired {}: order {} already {} -> {} not applicable, swallowing",
-                    event.getId(), orderId, e.getFrom(), e.getTo());
+            log.info("event=checkout.session.expired.transition_swallowed orderId={} from={} to={}",
+                    orderId, e.getFrom(), e.getTo());
         } catch (ResourceNotFoundException e) {
-            log.warn("checkout.session.expired {}: order {} not found during transition", event.getId(), orderId);
+            log.warn("event=checkout.session.expired.transition_order_not_found orderId={}", orderId);
         }
     }
 
@@ -130,8 +128,7 @@ public class StripeWebhookService {
         // a still-live Checkout Session is retryable by the customer (Stripe lets them try another card
         // on the same session); marking the order FAILED here would brick it if they then succeed on a
         // later attempt. Record-only (already done by the saveAndFlush above) + WARN log.
-        log.warn("payment_intent.payment_failed {}: payment intent {} failed, order left untouched (retryable within the same session)",
-                event.getId(), paymentIntent.getId());
+        log.warn("event=payment_intent.payment_failed paymentIntentId={}", paymentIntent.getId());
     }
 
     private void handleChargeRefunded(Event event) {
@@ -141,14 +138,14 @@ public class StripeWebhookService {
         // model). Transitioning to the terminal REFUNDED status on a partial refund would permanently
         // brick an order that should still ship. Record-only + INFO for partial refunds.
         if (!Boolean.TRUE.equals(charge.getRefunded())) {
-            log.info("charge.refunded {}: charge {} is only partially refunded (amount_refunded={}), leaving order untouched",
-                    event.getId(), charge.getId(), charge.getAmountRefunded());
+            log.info("event=charge.refunded.partial chargeId={} amountRefunded={}",
+                    charge.getId(), charge.getAmountRefunded());
             return;
         }
         Long orderId = resolveOrderIdFromCharge(charge);
         if (orderId == null) {
-            log.warn("charge.refunded {}: charge {} has no order matching paymentIntent {}",
-                    event.getId(), charge.getId(), charge.getPaymentIntent());
+            log.warn("event=charge.refunded.unresolved chargeId={} paymentIntent={}",
+                    charge.getId(), charge.getPaymentIntent());
             return;
         }
         try {
@@ -159,10 +156,10 @@ public class StripeWebhookService {
             // so there's nothing meaningful to overwrite it with here anyway.
             orderService.transitionSystem(orderId, OrderStatus.REFUNDED, null);
         } catch (InvalidTransitionException e) {
-            log.info("charge.refunded {}: order {} already {} -> {} not applicable, swallowing",
-                    event.getId(), orderId, e.getFrom(), e.getTo());
+            log.info("event=charge.refunded.transition_swallowed orderId={} from={} to={}",
+                    orderId, e.getFrom(), e.getTo());
         } catch (ResourceNotFoundException e) {
-            log.warn("charge.refunded {}: order {} not found during transition", event.getId(), orderId);
+            log.warn("event=charge.refunded.transition_order_not_found orderId={}", orderId);
         }
     }
 
@@ -182,7 +179,7 @@ public class StripeWebhookService {
                 default -> null;
             };
         } catch (RuntimeException e) {
-            log.warn("Unable to resolve orderId for Stripe event {} ({}) while recording it", event.getId(), event.getType(), e);
+            log.warn("event=stripe.webhook.order_resolution_failed type={}", event.getType(), e);
             return null;
         }
     }
@@ -194,7 +191,7 @@ public class StripeWebhookService {
             try {
                 return Long.valueOf(metaOrderId);
             } catch (NumberFormatException e) {
-                log.warn("Stripe session {} metadata.orderId '{}' is not a valid order id", session.getId(), metaOrderId);
+                log.warn("event=checkout.session.metadata_invalid sessionId={} metaOrderId={}", session.getId(), metaOrderId);
             }
         }
         String clientReferenceId = session.getClientReferenceId();

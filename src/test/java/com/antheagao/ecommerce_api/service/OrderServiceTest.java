@@ -1,5 +1,9 @@
 package com.antheagao.ecommerce_api.service;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.antheagao.ecommerce_api.dto.CreateOrderRequest;
 import com.antheagao.ecommerce_api.dto.OrderLineRequest;
 import com.antheagao.ecommerce_api.dto.OrderResponse;
@@ -7,6 +11,8 @@ import com.antheagao.ecommerce_api.entity.*;
 import com.antheagao.ecommerce_api.exception.ConflictException;
 import com.antheagao.ecommerce_api.exception.ResourceNotFoundException;
 import com.antheagao.ecommerce_api.repository.*;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -15,6 +21,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -55,6 +62,22 @@ class OrderServiceTest {
 
     @InjectMocks
     private OrderService orderService;
+
+    // Attaches directly to OrderService's logger (rather than root) so this test only ever sees
+    // OrderService's own log output, not noise from other classes under test in the same JVM.
+    private ListAppender<ILoggingEvent> logAppender;
+
+    @BeforeEach
+    void attachLogAppender() {
+        logAppender = new ListAppender<>();
+        logAppender.start();
+        ((Logger) LoggerFactory.getLogger(OrderService.class)).addAppender(logAppender);
+    }
+
+    @AfterEach
+    void detachLogAppender() {
+        ((Logger) LoggerFactory.getLogger(OrderService.class)).detachAppender(logAppender);
+    }
 
     // Wires orderRepository.save / orderItemRepository.save / orderRepository.findById together so the
     // returned Order accumulates the same OrderItems the service builds, mirroring what a real
@@ -563,6 +586,27 @@ class OrderServiceTest {
         OrderResponse response = orderService.transitionSystem(1L, OrderStatus.PAID, null);
 
         assertThat(response.getStatus()).isEqualTo(OrderStatus.PAID);
+    }
+
+    @Test
+    void transitionSystem_whenTransitionSucceeds_logsOrderTransitionEvent() {
+        // The single audit choke point for status changes -- asserts the exact event=order.transition
+        // line fires with from=/to=, since transitionSystem is the only place this batch wires it up
+        // (updateStatus, the user-facing admin PATCH path, deliberately isn't in scope).
+        User owner = User.builder().id(1L).build();
+        Order order = Order.builder().id(1L).user(owner).status(OrderStatus.PENDING).items(new ArrayList<>()).build();
+        when(orderRepository.findById(1L)).thenReturn(Optional.of(order));
+        when(orderRepository.save(any(Order.class))).thenReturn(order);
+
+        orderService.transitionSystem(1L, OrderStatus.PAID, null);
+
+        assertThat(logAppender.list)
+                .filteredOn(event -> event.getLevel() == Level.INFO)
+                .extracting(ILoggingEvent::getFormattedMessage)
+                .anySatisfy(message -> assertThat(message)
+                        .contains("event=order.transition")
+                        .contains("from=PENDING")
+                        .contains("to=PAID"));
     }
 
     @Test

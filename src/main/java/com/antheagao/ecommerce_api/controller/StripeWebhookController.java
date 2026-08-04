@@ -8,6 +8,7 @@ import com.stripe.model.Event;
 import com.stripe.net.Webhook;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -58,7 +59,7 @@ public class StripeWebhookController {
             // SignatureVerificationException really is the only source of the 400 below.
             Webhook.Signature.verifyHeader(payload, sigHeader, stripeProperties.getWebhookSecret(), Webhook.DEFAULT_TOLERANCE);
         } catch (SignatureVerificationException e) {
-            log.warn("Stripe webhook signature verification failed", e);
+            log.warn("event=stripe.webhook.signature_verification_failed", e);
             return ResponseEntity.badRequest().build();
         }
 
@@ -73,20 +74,28 @@ public class StripeWebhookController {
             // returns 200 rather than 400.
             event = Webhook.constructEvent(payload, sigHeader, stripeProperties.getWebhookSecret());
         } catch (SignatureVerificationException | RuntimeException e) {
-            log.error("Stripe webhook payload could not be parsed after signature verification succeeded", e);
+            log.error("event=stripe.webhook.parse_failed", e);
             return ResponseEntity.ok().build();
         }
 
+        MDC.put("stripeEventId", event.getId());
         try {
-            stripeWebhookService.process(event);
-        } catch (DataIntegrityViolationException e) {
-            // Replay of an already-processed event id (unique constraint on
-            // processed_stripe_events.event_id). StripeWebhookService.process() is @Transactional and
-            // rollback-only once this escapes it, so the catch has to live out here.
-            log.info("Stripe webhook event {} ({}) already processed -- replay, no re-fulfillment", event.getId(), event.getType());
-        }
+            log.info("event=stripe.webhook.received type={}", event.getType());
+            try {
+                stripeWebhookService.process(event);
+            } catch (DataIntegrityViolationException e) {
+                // Replay of an already-processed event id (unique constraint on
+                // processed_stripe_events.event_id). StripeWebhookService.process() is @Transactional and
+                // rollback-only once this escapes it, so the catch has to live out here.
+                log.info("event=stripe.webhook.outcome outcome=replay type={}", event.getType());
+                return ResponseEntity.ok().build();
+            }
 
-        return ResponseEntity.ok().build();
+            log.info("event=stripe.webhook.outcome outcome=processed type={}", event.getType());
+            return ResponseEntity.ok().build();
+        } finally {
+            MDC.remove("stripeEventId");
+        }
     }
 
     private boolean isBlank(String s) {

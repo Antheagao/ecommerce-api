@@ -15,6 +15,7 @@ import com.stripe.net.RequestOptions;
 import com.stripe.param.RefundCreateParams;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -59,48 +60,54 @@ public class RefundService {
 
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order", orderId));
-        if (!REFUNDABLE.contains(order.getStatus())) {
-            throw new ConflictException("Order " + order.getOrderNumber() + " cannot be refunded (current status: " + order.getStatus() + ")");
-        }
-        if (isBlank(order.getPaymentReference())) {
-            throw new ConflictException("Order " + order.getOrderNumber() + " was never paid through Stripe");
-        }
-
-        RefundCreateParams params = RefundCreateParams.builder()
-                .setPaymentIntent(order.getPaymentReference())
-                .build();
-        RequestOptions requestOptions = RequestOptions.builder()
-                // Order number as the idempotency key: an admin double-click on "refund" can't
-                // create two refunds for the same order.
-                .setIdempotencyKey("refund-" + order.getOrderNumber())
-                .build();
-
-        Refund refund;
+        MDC.put("orderNumber", order.getOrderNumber());
         try {
-            refund = stripeClient.refunds().create(params, requestOptions);
-        } catch (StripeException e) {
-            log.error("Stripe refund failed for order {}", order.getOrderNumber(), e);
-            throw new ServiceUnavailableException("Unable to process refund");
+            if (!REFUNDABLE.contains(order.getStatus())) {
+                throw new ConflictException("Order " + order.getOrderNumber() + " cannot be refunded (current status: " + order.getStatus() + ")");
+            }
+            if (isBlank(order.getPaymentReference())) {
+                throw new ConflictException("Order " + order.getOrderNumber() + " was never paid through Stripe");
+            }
+            log.info("event=refund.requested orderId={}", orderId);
+
+            RefundCreateParams params = RefundCreateParams.builder()
+                    .setPaymentIntent(order.getPaymentReference())
+                    .build();
+            RequestOptions requestOptions = RequestOptions.builder()
+                    // Order number as the idempotency key: an admin double-click on "refund" can't
+                    // create two refunds for the same order.
+                    .setIdempotencyKey("refund-" + order.getOrderNumber())
+                    .build();
+
+            Refund refund;
+            try {
+                refund = stripeClient.refunds().create(params, requestOptions);
+            } catch (StripeException e) {
+                log.error("event=refund.failed", e);
+                throw new ServiceUnavailableException("Unable to process refund");
+            }
+
+            log.info("event=refund.created refundId={} status={}", refund.getId(), refund.getStatus());
+
+            // null, not refund.getId(): overwriting paymentReference with the re_... id would clobber the
+            // pi_... reference that StripeWebhookService.resolveOrderIdFromCharge matches the subsequent
+            // charge.refunded event against. paymentReference already records the payment (set to the
+            // PaymentIntent id at PAID), so there's nothing meaningful to overwrite it with here. This
+            // deviates from the original task-board wording ("transitionSystem(REFUNDED, refundId)")
+            // deliberately, mirroring the F3 convention already applied in
+            // StripeWebhookService.handleChargeRefunded.
+            orderService.transitionSystem(orderId, OrderStatus.REFUNDED, null);
+
+            return RefundResponse.builder()
+                    .orderId(order.getId())
+                    .orderNumber(order.getOrderNumber())
+                    .refundId(refund.getId())
+                    .refundStatus(refund.getStatus())
+                    .orderStatus(OrderStatus.REFUNDED)
+                    .build();
+        } finally {
+            MDC.remove("orderNumber");
         }
-
-        log.info("Refund {} ({}) created for order {}", refund.getId(), refund.getStatus(), order.getOrderNumber());
-
-        // null, not refund.getId(): overwriting paymentReference with the re_... id would clobber the
-        // pi_... reference that StripeWebhookService.resolveOrderIdFromCharge matches the subsequent
-        // charge.refunded event against. paymentReference already records the payment (set to the
-        // PaymentIntent id at PAID), so there's nothing meaningful to overwrite it with here. This
-        // deviates from the original task-board wording ("transitionSystem(REFUNDED, refundId)")
-        // deliberately, mirroring the F3 convention already applied in
-        // StripeWebhookService.handleChargeRefunded.
-        orderService.transitionSystem(orderId, OrderStatus.REFUNDED, null);
-
-        return RefundResponse.builder()
-                .orderId(order.getId())
-                .orderNumber(order.getOrderNumber())
-                .refundId(refund.getId())
-                .refundStatus(refund.getStatus())
-                .orderStatus(OrderStatus.REFUNDED)
-                .build();
     }
 
     private boolean isBlank(String s) {

@@ -246,7 +246,12 @@ public class OrderService {
     public OrderResponse transitionSystem(Long orderId, OrderStatus newStatus, String paymentReference) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order", orderId));
+        OrderStatus from = order.getStatus();
         order = applyTransition(order, newStatus, paymentReference);
+        // Audit line, not an audit record: on the webhook path this joins the caller's tx, so a
+        // later rollback can orphan an already-emitted line. Stripe's retry re-emits it, and any
+        // rollback logs an ERROR nearby -- true tamper-proof audit would be a table, not a log.
+        log.info("event=order.transition orderId={} from={} to={}", orderId, from, newStatus);
         order = orderRepository.save(order);
         return toResponse(order);
     }
