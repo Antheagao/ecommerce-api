@@ -30,7 +30,9 @@ public class CartService {
     private final UserRepository userRepository;
     private final ProductRepository productRepository;
 
-    @Transactional(readOnly = true)
+    // Not readOnly: a user's first-ever GET lazily creates their cart row via getOrCreateCart,
+    // and Postgres enforces the read-only hint at the session level (H2 ignores it).
+    @Transactional
     public CartResponse getCart(Long userId) {
         Cart cart = getOrCreateCart(userId);
         return toResponse(cart);
